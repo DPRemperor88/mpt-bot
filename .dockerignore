@@ -1,0 +1,14 @@
+# Что НЕ копировать в Docker-образ
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.git/
+.gitignore
+.env
+bot.db
+*.db
+*.db-journal
+*.md
+data/
+bot.tar.gz

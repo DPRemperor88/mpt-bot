@@ -6,3 +6,5 @@ venv/
 bot.db
 *.db
 *.db-journal
+data/
+bot.tar.gz

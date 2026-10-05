@@ -1,0 +1,16 @@
+# Запуск бота на сервере:  docker compose up -d --build
+services:
+  bot:
+    build: .
+    container_name: mpt-bot
+    # Автозапуск после перезагрузки сервера и после падений
+    restart: unless-stopped
+    # Токен и админы берутся из .env (в образ не копируются)
+    env_file:
+      - .env
+    environment:
+      TZ: Europe/Moscow
+      # SQLite-файл лежит на хосте в ./data — не теряется при пересборке образа
+      DATABASE_URL: sqlite+aiosqlite:////data/bot.db
+    volumes:
+      - ./data:/data
