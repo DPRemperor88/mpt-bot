@@ -53,7 +53,7 @@ docker compose version
 
 ```powershell
 cd C:\path\to\bot
-tar -czf bot.tar.gz --exclude=.venv --exclude=__pycache__ --exclude=bot.db --exclude=.git .
+tar -czf bot.tar.gz --exclude=.venv --exclude=__pycache__ --exclude=bot.db --exclude=.git --exclude=bot.tar.gz --exclude=data .
 scp bot.tar.gz root@IP:/root/
 ```
 
@@ -134,8 +134,60 @@ Run polling for bot @имя_твоего_бота
 | Перезапустить | `docker compose restart` |
 | Остановить | `docker compose down` |
 | Запустить снова | `docker compose up -d` |
-| Обновить код после правок | залить заново (шаг 3) → `docker compose up -d --build` |
+| Обновить код после правок | `.\deploy.ps1` на своём ПК (см. ниже) |
 | Статус | `docker compose ps` |
+
+---
+
+## Обновление кода после правок (безопасно)
+
+Данные при обновлении **не теряются**: `bot.db` лежит на сервере в `/root/bot/data/`
+и не входит ни в архив, ни в образ.
+
+Порядок:
+
+1. Правишь код на своём компьютере.
+2. Сохраняешь версию в git:
+   ```powershell
+   git add -A
+   git commit -m "fix: что изменил"
+   ```
+3. Обновляешь сервер **одной командой**:
+   ```powershell
+   cd C:\path\to\bot
+   .\deploy.ps1
+   ```
+   Скрипт сам соберёт архив (без `.venv`, `.git`, `bot.db`), зальёт на сервер,
+   пересоберёт контейнер и покажет логи. Пароль спросит 2 раза — это нормально.
+
+Вручную (если скрипт не подходит):
+
+```powershell
+cd C:\path\to\bot
+tar -czf bot.tar.gz --exclude=.venv --exclude=__pycache__ --exclude=bot.db --exclude=.git --exclude=data --exclude=bot.tar.gz .
+scp bot.tar.gz root@IP:/root/
+ssh root@IP "cd /root/bot && tar -xzf /root/bot.tar.gz -C /root/bot && docker compose up -d --build"
+```
+
+### ⚠️ Не запускай бота локально с тем же токеном
+
+Пока работает серверный бот, локальный запуск с тем же `BOT_TOKEN` вызовет конфликт:
+Telegram отдаёт обновления только одному подключению. Нужно протестировать локально —
+сначала останови серверного (`docker compose down`), после — подними обратно (`docker compose up -d`).
+
+### Откат, если что-то сломалось
+
+```powershell
+git log --oneline        # посмотреть версии
+git checkout <хеш>       # вернуться на рабочую версию
+.\deploy.ps1             # залить её на сервер
+```
+
+### Бэкап базы перед рискованными изменениями
+
+```bash
+cp /root/bot/data/bot.db ~/bot-$(date +%F).db
+```
 
 ---
 
