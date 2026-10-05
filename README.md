@@ -104,7 +104,6 @@ database/            модели, сессия, CRUD
 handlers/            user, group, admin, states
 Dockerfile
 docker-compose.yml
-deploy.ps1           обновление на VPS одной командой
 DEPLOY.md            инструкция по развёртыванию
 ```
 

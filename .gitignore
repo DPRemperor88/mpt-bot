@@ -8,3 +8,4 @@ bot.db
 *.db-journal
 data/
 bot.tar.gz
+deploy.ps1
