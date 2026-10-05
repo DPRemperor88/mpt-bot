@@ -28,7 +28,7 @@ def normalize_subject(value: str | None) -> str:
 
 
 def format_date_ru(d: date) -> str:
-    """'06.10.2026 (Вторник)' → '06.10 (Вторник)' (без года, компактнее)."""
+    """'06.10 (Вторник)'."""
     return f"{d.day:02d}.{d.month:02d} ({DAY_RU_FULL[d.weekday()]})"
 
 
@@ -72,7 +72,7 @@ def render_schedule_text(
         homework = hw_by_subject.get(normalize_subject(subject))
         lines.append(f"ДЗ: {esc(homework) if homework else '—'}")
         if num in changes_by_num:
-            lines.append(f"🔄 <b>Замена:</b> {esc(changes_by_num[num])}")
+            lines.append(f"<b>Замена:</b> {esc(changes_by_num[num])}")
         lines.append("")
     return "\n".join(lines).strip()
 
@@ -84,9 +84,26 @@ def render_homework_list(items: list) -> str:
     """
     lines: list[str] = []
     for hw in items:
-        marker = " 📎" if hw.media_file_id else ""
+        marker = " (вложение)" if hw.media_file_id else ""
         lines.append(
-            f"📌 <b>{esc(hw.subject)}</b> — {esc(hw.text)} "
+            f"• <b>{esc(hw.subject)}</b> — {esc(hw.text)} "
             f"(до {format_date_ru(hw.due_date)}){marker}"
         )
+    return "\n".join(lines)
+
+
+def render_group_homework(items: list, target: date, label: str) -> str:
+    """
+    Формирует список ДЗ для группового чата (на сегодня/на завтра).
+
+    label — «сегодня» или «завтра».
+    """
+    header = f"<b>Домашнее задание на {label} — {format_date_ru(target)}</b>"
+    if not items:
+        return f"{header}\n\nЗаданий нет."
+
+    lines = [header, ""]
+    for hw in items:
+        marker = " (вложение)" if hw.media_file_id else ""
+        lines.append(f"• <b>{esc(hw.subject)}</b> — {esc(hw.text)}{marker}")
     return "\n".join(lines)

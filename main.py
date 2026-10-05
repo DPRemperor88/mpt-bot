@@ -22,7 +22,7 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 import config
 import services
 from database import init_db
-from handlers import admin_router, user_router
+from handlers import admin_router, group_router, user_router
 
 
 # ---------------------------------------------------------------------------
@@ -80,6 +80,7 @@ async def main() -> None:
     dp.callback_query.middleware(throttle)
 
     dp.include_router(user_router)
+    dp.include_router(group_router)
     dp.include_router(admin_router)
 
     # Фоновые задачи.

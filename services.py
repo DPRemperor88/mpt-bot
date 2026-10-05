@@ -119,9 +119,9 @@ async def refresh_changes(bot) -> int:
 async def notify_changes(bot, items: list, change_date_str: str) -> None:
     try:
         d = date.fromisoformat(change_date_str)
-        header = f"🔄 <b>Изменения в расписании на {format_date_ru(d)}</b>\n\n"
+        header = f"<b>Изменения в расписании на {format_date_ru(d)}</b>\n\n"
     except (TypeError, ValueError):
-        header = "🔄 <b>Изменения в расписании</b>\n\n"
+        header = "<b>Изменения в расписании</b>\n\n"
 
     lines = [
         f"• Пара {c['lesson']}: {c['replace_from']} → {c['replace_to']}"
@@ -160,9 +160,9 @@ async def broadcast(bot, text: str, media: tuple[str, str] | None = None) -> tup
 
 async def notify_new_homework(bot, hw) -> None:
     """Рассылает уведомление о новом домашнем задании (с вложением, если есть)."""
-    body = hw.text.strip() if (hw.text and hw.text.strip()) else "📎 (задание во вложении)"
+    body = hw.text.strip() if (hw.text and hw.text.strip()) else "(задание во вложении)"
     text = (
-        f"📚 <b>Новое домашнее задание</b>\n\n"
+        f"<b>Новое домашнее задание</b>\n\n"
         f"<b>{hw.subject}</b>: {body}\n"
         f"Сдать до: {format_date_ru(hw.due_date)}"
     )

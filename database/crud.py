@@ -101,6 +101,17 @@ async def list_active_homework(on_date: date) -> list[Homework]:
         return list(res.scalars().all())
 
 
+async def list_homework_on(due_date: date) -> list[Homework]:
+    """Активные ДЗ с дедлайном ровно на указанную дату (для группового чата)."""
+    async with SessionLocal() as s:
+        res = await s.execute(
+            select(Homework)
+            .where(Homework.is_active.is_(True), Homework.due_date == due_date)
+            .order_by(Homework.subject)
+        )
+        return list(res.scalars().all())
+
+
 async def list_homework(limit: int = 30) -> list[Homework]:
     """Все ДЗ (для админ-панели), последние сверху."""
     async with SessionLocal() as s:

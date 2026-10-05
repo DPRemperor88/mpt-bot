@@ -1,5 +1,5 @@
 """
-handlers/admin.py — админ-панель:
+handlers/admin.py — админ-панель (личный чат):
   * добавление ДЗ (FSM: дисциплина → дата → текст/вложение);
   * список ДЗ с завершением/удалением;
   * добавление модератора (только admin);
@@ -26,6 +26,10 @@ from .states import AddHomework, AddModerator, Broadcast
 
 admin_router = Router()
 
+# Админ-панель работает только в личном чате.
+admin_router.message.filter(F.chat.type == "private")
+admin_router.callback_query.filter(F.message.chat.type == "private")
+
 MODERATOR_ROLES = ("admin", "moderator")
 
 
@@ -38,13 +42,13 @@ async def _require_role(user_id: int, roles: tuple[str, ...]) -> str | None:
 # ---------------------------------------------------------------------------
 # Вход в админ-панель
 # ---------------------------------------------------------------------------
-@admin_router.message(F.text == "⚙️ Админ-панель")
+@admin_router.message(F.text == "Админ-панель")
 async def admin_panel(msg: Message) -> None:
     role = await _require_role(msg.from_user.id, MODERATOR_ROLES)
     if role is None:
-        await msg.answer("⛔ Недостаточно прав.")
+        await msg.answer("Недостаточно прав.")
         return
-    await msg.answer("⚙️ Админ-панель:", reply_markup=admin_menu(is_admin=(role == "admin")))
+    await msg.answer("Админ-панель:", reply_markup=admin_menu(is_admin=(role == "admin")))
 
 
 @admin_router.callback_query(F.data == "adm:menu")
@@ -52,9 +56,9 @@ async def admin_menu_cb(cq: CallbackQuery) -> None:
     await cq.answer()
     role = await _require_role(cq.from_user.id, MODERATOR_ROLES)
     if role is None:
-        await cq.message.edit_text("⛔ Недостаточно прав.")
+        await cq.message.edit_text("Недостаточно прав.")
         return
-    await cq.message.edit_text("⚙️ Админ-панель:", reply_markup=admin_menu(is_admin=(role == "admin")))
+    await cq.message.edit_text("Админ-панель:", reply_markup=admin_menu(is_admin=(role == "admin")))
 
 
 @admin_router.callback_query(F.data == "adm:close")
@@ -70,7 +74,7 @@ async def admin_close(cq: CallbackQuery) -> None:
 async def add_hw_start(cq: CallbackQuery, state: FSMContext) -> None:
     await cq.answer()
     if await _require_role(cq.from_user.id, MODERATOR_ROLES) is None:
-        await cq.message.edit_text("⛔ Недостаточно прав.")
+        await cq.message.edit_text("Недостаточно прав.")
         return
     subjects = await get_subjects()
     await state.update_data(subjects=subjects)
@@ -187,7 +191,7 @@ async def _save_homework(
 
     if not subject or not due_str:
         await state.clear()
-        await msg.answer("⚠️ Данные потерялись — начните добавление заново.")
+        await msg.answer("Данные потерялись — начните добавление заново.")
         return
     if not text and not media:
         await msg.answer("Отправьте текст ДЗ или прикрепите файл/фото.")
@@ -203,7 +207,7 @@ async def _save_homework(
         created_by=msg.from_user.id,
     )
     await state.clear()
-    await msg.answer(f"✅ ДЗ по «{subject}» сохранено (сдать до {format_date_ru(due)}).")
+    await msg.answer(f"ДЗ по «{subject}» сохранено (сдать до {format_date_ru(due)}).")
     await notify_new_homework(msg.bot, hw)
 
 
@@ -214,7 +218,7 @@ async def _save_homework(
 async def list_hw(cq: CallbackQuery) -> None:
     await cq.answer()
     if await _require_role(cq.from_user.id, MODERATOR_ROLES) is None:
-        await cq.message.edit_text("⛔ Недостаточно прав.")
+        await cq.message.edit_text("Недостаточно прав.")
         return
     await _render_hw_list(cq)
 
@@ -227,7 +231,7 @@ async def _render_hw_list(cq: CallbackQuery) -> None:
 
     lines = ["<b>Домашние задания (последние 20):</b>"]
     for hw in items:
-        status = "🟢" if hw.is_active else "⚪"
+        status = "[активно]" if hw.is_active else "[завершено]"
         lines.append(
             f"\n{status} <b>#{hw.id}</b> {hw.subject} — {hw.text[:90]} "
             f"(до {format_date_ru(hw.due_date)})"
@@ -237,12 +241,12 @@ async def _render_hw_list(cq: CallbackQuery) -> None:
     for hw in items:
         if hw.is_active:
             buttons.append(
-                [InlineKeyboardButton(text=f"✅ Завершить #{hw.id}", callback_data=f"hwact:{hw.id}")]
+                [InlineKeyboardButton(text=f"Завершить #{hw.id}", callback_data=f"hwact:{hw.id}")]
             )
         buttons.append(
-            [InlineKeyboardButton(text=f"🗑 Удалить #{hw.id}", callback_data=f"hwdel:{hw.id}")]
+            [InlineKeyboardButton(text=f"Удалить #{hw.id}", callback_data=f"hwdel:{hw.id}")]
         )
-    buttons.append([InlineKeyboardButton(text="🔙 Назад", callback_data="adm:menu")])
+    buttons.append([InlineKeyboardButton(text="Назад", callback_data="adm:menu")])
 
     await cq.message.edit_text(
         "\n".join(lines),
@@ -277,7 +281,7 @@ async def hw_delete(cq: CallbackQuery) -> None:
 async def add_mod_start(cq: CallbackQuery, state: FSMContext) -> None:
     await cq.answer()
     if await _require_role(cq.from_user.id, ("admin",)) is None:
-        await cq.message.edit_text("⛔ Только главный администратор.")
+        await cq.message.edit_text("Только главный администратор.")
         return
     await cq.message.edit_text(
         "Отправьте Telegram ID нового модератора (числом)\n"
@@ -311,7 +315,7 @@ async def add_mod_handler(msg: Message, state: FSMContext) -> None:
     await crud.get_or_create_user(user_id)
     await crud.set_user_role(user_id, "moderator")
     await state.clear()
-    await msg.answer(f"✅ Пользователь <code>{user_id}</code> назначен модератором.")
+    await msg.answer(f"Пользователь <code>{user_id}</code> назначен модератором.")
 
 
 # ---------------------------------------------------------------------------
@@ -321,7 +325,7 @@ async def add_mod_handler(msg: Message, state: FSMContext) -> None:
 async def broadcast_start(cq: CallbackQuery, state: FSMContext) -> None:
     await cq.answer()
     if await _require_role(cq.from_user.id, ("admin",)) is None:
-        await cq.message.edit_text("⛔ Только главный администратор.")
+        await cq.message.edit_text("Только главный администратор.")
         return
     await cq.message.edit_text(
         "Отправьте текст или медиа (фото/файл) для рассылки всем пользователям."
@@ -341,4 +345,4 @@ async def broadcast_do(msg: Message, state: FSMContext) -> None:
     await state.clear()
 
     delivered, total = await broadcast(msg.bot, text, media)
-    await msg.answer(f"📣 Рассылка завершена: доставлено {delivered} из {total}.")
+    await msg.answer(f"Рассылка завершена: доставлено {delivered} из {total}.")

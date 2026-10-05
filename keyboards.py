@@ -12,18 +12,31 @@ from aiogram.types import (
 
 
 # ---------------------------------------------------------------------------
-# Главное меню (Reply Keyboard)
+# Главное меню (Reply Keyboard) — личный чат
 # ---------------------------------------------------------------------------
 def main_menu(is_privileged: bool = False) -> ReplyKeyboardMarkup:
     """Главное меню. Кнопка админ-панели видна только админам/модераторам."""
     keyboard = [
-        [KeyboardButton(text="📅 Расписание на сегодня")],
-        [KeyboardButton(text="📅 Расписание на завтра")],
-        [KeyboardButton(text="📚 Домашнее задание")],
+        [KeyboardButton(text="Расписание на сегодня")],
+        [KeyboardButton(text="Расписание на завтра")],
+        [KeyboardButton(text="Домашнее задание")],
     ]
     if is_privileged:
-        keyboard.append([KeyboardButton(text="⚙️ Админ-панель")])
+        keyboard.append([KeyboardButton(text="Админ-панель")])
     return ReplyKeyboardMarkup(keyboard=keyboard, resize_keyboard=True)
+
+
+# ---------------------------------------------------------------------------
+# Меню группового чата (Inline Keyboard) — только ДЗ
+# ---------------------------------------------------------------------------
+def group_menu() -> InlineKeyboardMarkup:
+    """В группе доступны только домашние задания на сегодня и завтра."""
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="ДЗ на сегодня", callback_data="grp:today")],
+            [InlineKeyboardButton(text="ДЗ на завтра", callback_data="grp:tomorrow")],
+        ]
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -31,17 +44,17 @@ def main_menu(is_privileged: bool = False) -> ReplyKeyboardMarkup:
 # ---------------------------------------------------------------------------
 def admin_menu(is_admin: bool = False) -> InlineKeyboardMarkup:
     rows = [
-        [InlineKeyboardButton(text="➕ Добавить ДЗ", callback_data="adm:add_hw")],
-        [InlineKeyboardButton(text="📋 Список ДЗ", callback_data="adm:list_hw")],
+        [InlineKeyboardButton(text="Добавить ДЗ", callback_data="adm:add_hw")],
+        [InlineKeyboardButton(text="Список ДЗ", callback_data="adm:list_hw")],
     ]
     if is_admin:
         rows.append(
-            [InlineKeyboardButton(text="👤 Добавить модератора", callback_data="adm:add_mod")]
+            [InlineKeyboardButton(text="Добавить модератора", callback_data="adm:add_mod")]
         )
         rows.append(
-            [InlineKeyboardButton(text="📣 Рассылка", callback_data="adm:broadcast")]
+            [InlineKeyboardButton(text="Рассылка", callback_data="adm:broadcast")]
         )
-    rows.append([InlineKeyboardButton(text="🔙 Закрыть", callback_data="adm:close")])
+    rows.append([InlineKeyboardButton(text="Закрыть", callback_data="adm:close")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
@@ -57,9 +70,9 @@ def subjects_choose_keyboard(subjects: list[str]) -> InlineKeyboardMarkup:
         for i, s in enumerate(subjects)
     ]
     buttons.append(
-        [InlineKeyboardButton(text="✍️ Ввести вручную", callback_data="hwsubj:manual")]
+        [InlineKeyboardButton(text="Ввести вручную", callback_data="hwsubj:manual")]
     )
-    buttons.append([InlineKeyboardButton(text="❌ Отмена", callback_data="hwsubj:cancel")])
+    buttons.append([InlineKeyboardButton(text="Отмена", callback_data="hwsubj:cancel")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
@@ -72,5 +85,5 @@ def due_date_choose_keyboard(dates: list[tuple[str, str]]) -> InlineKeyboardMark
         [InlineKeyboardButton(text=label, callback_data=f"hwdate:{i}")]
         for i, (_iso, label) in enumerate(dates)
     ]
-    buttons.append([InlineKeyboardButton(text="❌ Отмена", callback_data="hwdate:cancel")])
+    buttons.append([InlineKeyboardButton(text="Отмена", callback_data="hwdate:cancel")])
     return InlineKeyboardMarkup(inline_keyboard=buttons)
