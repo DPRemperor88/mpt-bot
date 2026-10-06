@@ -47,6 +47,18 @@ async def _clear_media(bot, chat_id: int) -> None:
             pass
 
 
+async def _delete_message(bot, chat_id: int, message_id: int) -> None:
+    """
+    Удаляет сообщение, игнорируя ошибки.
+    Чужие сообщения в группе бот может удалять только как администратор
+    с правом «Удаление сообщений».
+    """
+    try:
+        await bot.delete_message(chat_id, message_id)
+    except Exception:
+        pass
+
+
 async def _remember(chat) -> None:
     """Запоминает группу, чтобы сюда приходили уведомления о заменах."""
     try:
@@ -56,6 +68,7 @@ async def _remember(chat) -> None:
 
 
 async def _send_group_menu(message: Message) -> None:
+    await _delete_message(message.bot, message.chat.id, message.message_id)
     await _remember(message.chat)
     await message.answer(WELCOME, reply_markup=group_menu())
 
@@ -123,6 +136,7 @@ async def group_menu_cmd(msg: Message) -> None:
 
 @group_router.message(Command("today"))
 async def group_today_cmd(msg: Message) -> None:
+    await _delete_message(msg.bot, msg.chat.id, msg.message_id)
     target = datetime.now(TZ).date()
     items = await crud.list_homework_on(target)
     await _show_homework(msg.bot, msg.chat, target, "сегодня", items)
@@ -130,6 +144,7 @@ async def group_today_cmd(msg: Message) -> None:
 
 @group_router.message(Command("tomorrow"))
 async def group_tomorrow_cmd(msg: Message) -> None:
+    await _delete_message(msg.bot, msg.chat.id, msg.message_id)
     target = datetime.now(TZ).date() + timedelta(days=1)
     items = await crud.list_homework_on(target)
     await _show_homework(msg.bot, msg.chat, target, "завтра", items)
