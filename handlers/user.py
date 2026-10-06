@@ -2,6 +2,8 @@
 handlers/user.py — хэндлеры обычного пользователя (личный чат):
   /start (приветствие с Telegram ID), /menu, «Расписание на сегодня/завтра»,
   «Домашнее задание».
+
+Все разделы показываются в одном сообщении: предыдущий экран удаляется.
 """
 from __future__ import annotations
 
@@ -12,6 +14,7 @@ from aiogram.filters import Command, CommandStart
 from aiogram.types import Message
 
 import parser as schedule_parser
+import ui
 from config import ADMIN_IDS, CALL_SCHEDULE, GROUP_NAME, TZ
 from database import crud
 from keyboards import main_menu
@@ -29,6 +32,15 @@ user_router.message.filter(F.chat.type == "private")
 # ---------------------------------------------------------------------------
 @user_router.message(CommandStart())
 async def cmd_start(msg: Message) -> None:
+    await _greet(msg, greeting=True)
+
+
+@user_router.message(Command("menu"))
+async def cmd_menu(msg: Message) -> None:
+    await _greet(msg, greeting=False)
+
+
+async def _greet(msg: Message, greeting: bool) -> None:
     tg = msg.from_user
     user = await crud.get_or_create_user(tg.id, tg.username, tg.full_name)
 
@@ -39,28 +51,25 @@ async def cmd_start(msg: Message) -> None:
 
     privileged = user.role in ("admin", "moderator")
 
-    if user.role == "admin":
-        extra = "Вы являетесь главным администратором."
-    elif user.role == "moderator":
-        extra = "Вы являетесь модератором."
+    if greeting:
+        if user.role == "admin":
+            extra = "Вы являетесь главным администратором."
+        elif user.role == "moderator":
+            extra = "Вы являетесь модератором."
+        else:
+            extra = "Отправьте свой ID администратору, чтобы получить права модератора."
+        text = (
+            f"Привет, {tg.first_name}!\n"
+            f"Это бот расписания и домашних заданий группы <b>{GROUP_NAME}</b>.\n\n"
+            f"Ваш Telegram ID: <code>{tg.id}</code>\n"
+            f"{extra}\n\n"
+            f"Выберите действие в меню ниже."
+        )
     else:
-        extra = "Отправьте свой ID администратору, чтобы получить права модератора."
+        text = "Главное меню:"
 
-    text = (
-        f"Привет, {tg.first_name}!\n"
-        f"Это бот расписания и домашних заданий группы <b>{GROUP_NAME}</b>.\n\n"
-        f"Ваш Telegram ID: <code>{tg.id}</code>\n"
-        f"{extra}\n\n"
-        f"Выберите действие в меню ниже."
-    )
-    await msg.answer(text, reply_markup=main_menu(privileged))
-
-
-@user_router.message(Command("menu"))
-async def cmd_menu(msg: Message) -> None:
-    user = await crud.get_user(msg.from_user.id)
-    privileged = bool(user and user.role in ("admin", "moderator"))
-    await msg.answer("Главное меню:", reply_markup=main_menu(privileged))
+    await ui.delete_safe(msg.bot, msg.chat.id, msg.message_id)
+    await ui.show(msg.bot, msg.chat.id, tg.id, text, reply_markup=main_menu(privileged))
 
 
 # ---------------------------------------------------------------------------
@@ -77,6 +86,10 @@ async def schedule_tomorrow(msg: Message) -> None:
 
 
 async def _send_schedule(msg: Message, offset: int) -> None:
+    user_id = msg.from_user.id
+    chat_id = msg.chat.id
+    await ui.delete_safe(msg.bot, chat_id, msg.message_id)
+
     target = datetime.now(TZ).date() + timedelta(days=offset)
 
     data = await ensure_schedule()
@@ -88,13 +101,13 @@ async def _send_schedule(msg: Message, offset: int) -> None:
     header = f"<b>{format_date_ru(target)}</b>\nНеделя: <b>{week}</b>"
 
     if not lessons:
-        await msg.answer(header + "\n\n—")
+        await ui.show(msg.bot, chat_id, user_id, header + "\n\n—")
         return
 
     hw_by_subject = await active_hw_map(target)
     changes_map = await get_changes_map(target)
     body = render_schedule_text(lessons, week, CALL_SCHEDULE, hw_by_subject, changes_map)
-    await msg.answer(header + "\n\n" + body)
+    await ui.show(msg.bot, chat_id, user_id, header + "\n\n" + body)
 
 
 # ---------------------------------------------------------------------------
@@ -102,9 +115,13 @@ async def _send_schedule(msg: Message, offset: int) -> None:
 # ---------------------------------------------------------------------------
 @user_router.message(F.text == "Домашнее задание")
 async def homework_list(msg: Message) -> None:
+    user_id = msg.from_user.id
+    chat_id = msg.chat.id
+    await ui.delete_safe(msg.bot, chat_id, msg.message_id)
+
     today = datetime.now(TZ).date()
     items = await crud.list_active_homework(today)
     if not items:
-        await msg.answer("Активных домашних заданий нет.")
+        await ui.show(msg.bot, chat_id, user_id, "Активных домашних заданий нет.")
         return
-    await msg.answer(render_homework_list(items))
+    await ui.show(msg.bot, chat_id, user_id, render_homework_list(items))
