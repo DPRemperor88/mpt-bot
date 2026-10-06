@@ -16,7 +16,12 @@ from aiogram import BaseMiddleware, Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.fsm.storage.memory import MemoryStorage
-from aiogram.types import TelegramObject
+from aiogram.types import (
+    BotCommand,
+    BotCommandScopeAllGroupChats,
+    BotCommandScopeAllPrivateChats,
+    TelegramObject,
+)
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 import config
@@ -54,6 +59,21 @@ class ThrottlingMiddleware(BaseMiddleware):
         return await handler(event, data)
 
 
+# ---------------------------------------------------------------------------
+# Меню команд (список по «/»)
+# ---------------------------------------------------------------------------
+PRIVATE_COMMANDS = [
+    BotCommand(command="start", description="Главное меню"),
+    BotCommand(command="menu", description="Показать меню"),
+]
+
+GROUP_COMMANDS = [
+    BotCommand(command="today", description="Домашние задания на сегодня"),
+    BotCommand(command="tomorrow", description="Домашние задания на завтра"),
+    BotCommand(command="menu", description="Меню бота"),
+]
+
+
 async def main() -> None:
     logging.basicConfig(
         level=logging.INFO,
@@ -72,6 +92,11 @@ async def main() -> None:
         token=config.BOT_TOKEN,
         default=DefaultBotProperties(parse_mode=ParseMode.HTML),
     )
+
+    # Меню команд: своё для личных чатов и своё для групп.
+    await bot.set_my_commands(PRIVATE_COMMANDS, scope=BotCommandScopeAllPrivateChats())
+    await bot.set_my_commands(GROUP_COMMANDS, scope=BotCommandScopeAllGroupChats())
+
     dp = Dispatcher(storage=MemoryStorage())
 
     # Антиспам на сообщения и нажатия кнопок.
