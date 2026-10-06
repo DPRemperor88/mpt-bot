@@ -88,8 +88,13 @@ async def on_my_chat_member(event: ChatMemberUpdated) -> None:
     old = event.old_chat_member.status
     added = new in (ChatMemberStatus.MEMBER, ChatMemberStatus.ADMINISTRATOR)
     was_present = old in (ChatMemberStatus.MEMBER, ChatMemberStatus.ADMINISTRATOR)
+
     if added and not was_present:
+        # запоминаем группу, чтобы слать сюда уведомления о заменах
+        await crud.add_group_chat(event.chat.id, event.chat.title)
         await event.bot.send_message(event.chat.id, WELCOME, reply_markup=group_menu())
+    elif was_present and not added:
+        await crud.remove_group_chat(event.chat.id)
 
 
 # ---------------------------------------------------------------------------

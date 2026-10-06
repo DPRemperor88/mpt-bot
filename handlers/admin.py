@@ -22,6 +22,7 @@ from database import crud
 from keyboards import (
     admin_menu,
     due_date_choose_keyboard,
+    hw_text_keyboard,
     subjects_choose_keyboard,
 )
 from services import (
@@ -196,71 +197,103 @@ async def add_hw_due_cb(cq: CallbackQuery, state: FSMContext) -> None:
         await _screen(cq, "Ошибка, попробуйте ещё раз.")
         return
 
-    await state.update_data(due_date=due)
-    await _screen(
-        cq,
-        "Шаг 3/3. Введите текст домашнего задания.\n"
-        "Можно прикрепить фото или файл — подпись станет текстом ДЗ.",
-    )
+    await state.update_data(due_date=due, hw_text="", files=[])
     await state.set_state(AddHomework.text)
+    ui.track(cq.from_user.id, [cq.message.message_id])
+    await _refresh_buffer(cq.bot, cq.message.chat.id, cq.from_user.id, state)
+
+
+async def _refresh_buffer(bot, chat_id: int, user_id: int, state: FSMContext) -> None:
+    """Показывает шаг 3: что уже введено, и кнопку «Готово»."""
+    data = await state.get_data()
+    subject = data.get("subject") or "—"
+    due = data.get("due_date")
+    due_text = format_date_ru(date.fromisoformat(due)) if due else "—"
+    text = (data.get("hw_text") or "").strip()
+    files = data.get("files", [])
+
+    body = (
+        "Шаг 3/3. Отправьте текст задания и файлы (можно несколько).\n"
+        "Когда закончите, нажмите «Готово».\n\n"
+        f"<b>Дисциплина:</b> {esc(subject)}\n"
+        f"<b>Срок:</b> {due_text}\n"
+        f"<b>Текст:</b> {esc(text) if text else '—'}\n"
+        f"<b>Файлов:</b> {len(files)}"
+    )
+    await ui.update(bot, chat_id, user_id, body, hw_text_keyboard())
 
 
 @admin_router.message(AddHomework.text, F.text)
 async def add_hw_text(msg: Message, state: FSMContext) -> None:
-    await _save_homework(msg, state, text=msg.text, media=None)
+    text = (msg.text or "").strip()
+    await ui.delete_safe(msg.bot, msg.chat.id, msg.message_id)
+    if text:
+        await state.update_data(hw_text=text)
+    await _refresh_buffer(msg.bot, msg.chat.id, msg.from_user.id, state)
 
 
 @admin_router.message(AddHomework.text, F.photo)
 async def add_hw_photo(msg: Message, state: FSMContext) -> None:
-    await _save_homework(msg, state, text=msg.caption, media=(msg.photo[-1].file_id, "photo"))
+    data = await state.get_data()
+    files = list(data.get("files", []))
+    files.append([msg.photo[-1].file_id, "photo"])
+    patch: dict = {"files": files}
+    if not (data.get("hw_text") or "").strip() and msg.caption:
+        patch["hw_text"] = msg.caption.strip()
+    await state.update_data(**patch)
+    await ui.delete_safe(msg.bot, msg.chat.id, msg.message_id)
+    await _refresh_buffer(msg.bot, msg.chat.id, msg.from_user.id, state)
 
 
 @admin_router.message(AddHomework.text, F.document)
 async def add_hw_document(msg: Message, state: FSMContext) -> None:
-    # без подписи берём имя файла, чтобы задание не осталось без описания
-    text = msg.caption or msg.document.file_name
-    await _save_homework(msg, state, text=text, media=(msg.document.file_id, "document"))
+    data = await state.get_data()
+    files = list(data.get("files", []))
+    files.append([msg.document.file_id, "document"])
+    patch: dict = {"files": files}
+    if not (data.get("hw_text") or "").strip():
+        # без подписи берём имя файла, чтобы задание не осталось без описания
+        patch["hw_text"] = (msg.caption or msg.document.file_name or "").strip()
+    await state.update_data(**patch)
+    await ui.delete_safe(msg.bot, msg.chat.id, msg.message_id)
+    await _refresh_buffer(msg.bot, msg.chat.id, msg.from_user.id, state)
 
 
-async def _save_homework(
-    msg: Message,
-    state: FSMContext,
-    text: str | None,
-    media: tuple[str, str] | None,
-) -> None:
-    user_id = msg.from_user.id
-    chat_id = msg.chat.id
+@admin_router.callback_query(F.data == "hwtext:cancel", AddHomework.text)
+async def add_hw_cancel(cq: CallbackQuery, state: FSMContext) -> None:
+    await cq.answer()
+    await state.clear()
+    await _screen(cq, "Отменено.")
+
+
+@admin_router.callback_query(F.data == "hwdone", AddHomework.text)
+async def add_hw_done(cq: CallbackQuery, state: FSMContext) -> None:
+    await cq.answer()
     data = await state.get_data()
     subject = data.get("subject")
     due_str = data.get("due_date")
-
-    await ui.delete_safe(msg.bot, chat_id, msg.message_id)
+    text = (data.get("hw_text") or "").strip()
+    files = data.get("files", [])
 
     if not subject or not due_str:
         await state.clear()
-        await ui.update(msg.bot, chat_id, user_id, "Данные потерялись — начните добавление заново.")
+        await _screen(cq, "Данные потерялись — начните добавление заново.")
         return
-    if not text and not media:
-        await ui.update(msg.bot, chat_id, user_id, "Отправьте текст ДЗ или прикрепите файл/фото.")
+    if not text and not files:
+        await _screen(cq, "Добавьте текст задания или хотя бы один файл.", hw_text_keyboard())
         return
 
     due = date.fromisoformat(due_str)
     hw = await crud.add_homework(
         subject=subject,
-        text=text or "",
+        text=text,
         due_date=due,
-        media_file_id=media[0] if media else None,
-        media_type=media[1] if media else None,
-        created_by=user_id,
+        created_by=cq.from_user.id,
     )
+    await crud.add_homework_files(hw.id, [(f[0], f[1]) for f in files])
     await state.clear()
-    await ui.update(
-        msg.bot,
-        chat_id,
-        user_id,
-        f"ДЗ по «{subject}» сохранено (сдать до {format_date_ru(due)}).",
-    )
-    await notify_new_homework(msg.bot, hw)
+    await _screen(cq, f"ДЗ по «{esc(subject)}» сохранено (сдать до {format_date_ru(due)}).")
+    await notify_new_homework(cq.bot, hw)
 
 
 # ---------------------------------------------------------------------------

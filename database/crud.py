@@ -12,7 +12,7 @@ from datetime import date
 from sqlalchemy import delete, select
 
 from .db import SessionLocal
-from .models import ChangesCache, Homework, ScheduleCache, User
+from .models import ChangesCache, GroupChat, Homework, HomeworkFile, ScheduleCache, User
 
 
 # ---------------------------------------------------------------------------
@@ -130,8 +130,37 @@ async def set_homework_active(homework_id: int, active: bool) -> None:
             await s.commit()
 
 
+async def add_homework_files(homework_id: int, files: list[tuple[str, str]]) -> None:
+    """files: список пар (file_id, тип: photo | document)."""
+    if not files:
+        return
+    async with SessionLocal() as s:
+        for file_id, file_type in files:
+            s.add(
+                HomeworkFile(
+                    homework_id=homework_id,
+                    file_id=file_id,
+                    file_type=file_type,
+                )
+            )
+        await s.commit()
+
+
+async def list_homework_files(homework_id: int) -> list[HomeworkFile]:
+    async with SessionLocal() as s:
+        res = await s.execute(
+            select(HomeworkFile)
+            .where(HomeworkFile.homework_id == homework_id)
+            .order_by(HomeworkFile.id)
+        )
+        return list(res.scalars().all())
+
+
 async def delete_homework(homework_id: int) -> None:
     async with SessionLocal() as s:
+        await s.execute(
+            delete(HomeworkFile).where(HomeworkFile.homework_id == homework_id)
+        )
         await s.execute(delete(Homework).where(Homework.id == homework_id))
         await s.commit()
 
@@ -219,3 +248,31 @@ async def get_changes(group_name: str) -> dict | None:
         "date": row.change_date.isoformat() if row.change_date else None,
         "changes": json.loads(row.snapshot_json),
     }
+
+
+# ---------------------------------------------------------------------------
+# Групповые чаты
+# ---------------------------------------------------------------------------
+async def add_group_chat(chat_id: int, title: str | None = None) -> None:
+    """Запомнить группу, куда добавлен бот."""
+    async with SessionLocal() as s:
+        res = await s.execute(select(GroupChat).where(GroupChat.chat_id == chat_id))
+        row = res.scalar_one_or_none()
+        if row is None:
+            s.add(GroupChat(chat_id=chat_id, title=title))
+        else:
+            row.title = title
+        await s.commit()
+
+
+async def remove_group_chat(chat_id: int) -> None:
+    """Забыть группу, из которой бота удалили."""
+    async with SessionLocal() as s:
+        await s.execute(delete(GroupChat).where(GroupChat.chat_id == chat_id))
+        await s.commit()
+
+
+async def list_group_chats() -> list[GroupChat]:
+    async with SessionLocal() as s:
+        res = await s.execute(select(GroupChat).order_by(GroupChat.id))
+        return list(res.scalars().all())

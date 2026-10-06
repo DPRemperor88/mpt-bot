@@ -78,6 +78,18 @@ def subjects_choose_keyboard(subjects: list[str]) -> InlineKeyboardMarkup:
 
 
 # ---------------------------------------------------------------------------
+# Шаг 3 добавления ДЗ: текст и файлы собраны
+# ---------------------------------------------------------------------------
+def hw_text_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="Готово", callback_data="hwdone")],
+            [InlineKeyboardButton(text="Отмена", callback_data="hwtext:cancel")],
+        ]
+    )
+
+
+# ---------------------------------------------------------------------------
 # Выбор даты сдачи (шаг 2 добавления ДЗ)
 # ---------------------------------------------------------------------------
 def due_date_choose_keyboard(dates: list[tuple[str, str]]) -> InlineKeyboardMarkup:

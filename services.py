@@ -136,7 +136,9 @@ async def notify_changes(bot, items: list, change_date_str: str) -> None:
         f"• Пара {c['lesson']}: {c['replace_from']} → {c['replace_to']}"
         for c in items
     ]
-    await broadcast(bot, header + "\n".join(lines))
+    message = header + "\n".join(lines)
+    await broadcast(bot, message)             # личка подписчикам
+    await broadcast_to_groups(bot, message)   # и в группы, где есть бот
 
 
 # ---------------------------------------------------------------------------
@@ -167,34 +169,72 @@ async def broadcast(bot, text: str, media: tuple[str, str] | None = None) -> tup
     return delivered, len(users)
 
 
+async def broadcast_to_groups(bot, text: str) -> int:
+    """Шлёт сообщение во все группы, куда добавлен бот. Возвращает число доставок."""
+    chats = await crud.list_group_chats()
+    delivered = 0
+    for chat in chats:
+        try:
+            await bot.send_message(chat.chat_id, text)
+            delivered += 1
+        except Exception:
+            # бота удалили из группы — пропускаем
+            pass
+        await asyncio.sleep(0.05)
+    return delivered
+
+
 async def notify_new_homework(bot, hw) -> None:
-    """Рассылает уведомление о новом домашнем задании (с вложением, если есть)."""
+    """Рассылает уведомление о новом домашнем задании вместе с вложениями."""
     body = hw.text.strip() if (hw.text and hw.text.strip()) else "(задание во вложении)"
     text = (
         f"<b>Новое домашнее задание</b>\n\n"
         f"<b>{hw.subject}</b>: {body}\n"
         f"Сдать до: {format_date_ru(hw.due_date)}"
     )
-    media = (hw.media_file_id, hw.media_type) if (hw.media_file_id and hw.media_type) else None
-    await broadcast(bot, text, media)
+    files = await _homework_files(hw)
+
+    for user in await crud.list_users():
+        try:
+            await bot.send_message(user.telegram_id, text)
+        except Exception:
+            # пользователь заблокировал бота — пропускаем
+            continue
+        await send_homework_media(bot, user.telegram_id, hw, files)
+        await asyncio.sleep(0.05)
 
 
-async def send_homework_media(bot, chat_id: int, hw) -> list[int]:
+async def _homework_files(hw) -> list[tuple[str, str]]:
+    """Все вложения задания: устаревшее одиночное поле плюс таблица файлов."""
+    files: list[tuple[str, str]] = []
+    if hw.media_file_id:
+        files.append((hw.media_file_id, hw.media_type or "document"))
+    for row in await crud.list_homework_files(hw.id):
+        files.append((row.file_id, row.file_type))
+    return files
+
+
+async def send_homework_media(bot, chat_id: int, hw, files=None) -> list[int]:
     """
-    Отправляет вложение домашнего задания (фото или файл) в указанный чат.
-    Возвращает id отправленных сообщений; пустой список, если вложения нет.
+    Отправляет все вложения домашнего задания в указанный чат.
+    Возвращает id отправленных сообщений.
     """
-    if not hw.media_file_id:
-        return []
-    try:
-        if hw.media_type == "photo":
-            sent = await bot.send_photo(chat_id, hw.media_file_id, caption=hw.subject)
-        else:
-            sent = await bot.send_document(chat_id, hw.media_file_id, caption=hw.subject)
-    except Exception:
-        # файл недоступен (удалён или устарел) — выдачу не роняем
-        return []
-    return [sent.message_id]
+    if files is None:
+        files = await _homework_files(hw)
+
+    sent_ids: list[int] = []
+    for index, (file_id, file_type) in enumerate(files):
+        caption = hw.subject if index == 0 else None
+        try:
+            if file_type == "photo":
+                sent = await bot.send_photo(chat_id, file_id, caption=caption)
+            else:
+                sent = await bot.send_document(chat_id, file_id, caption=caption)
+        except Exception:
+            # файл недоступен (удалён или устарел) — выдачу не роняем
+            continue
+        sent_ids.append(sent.message_id)
+    return sent_ids
 
 
 # ---------------------------------------------------------------------------

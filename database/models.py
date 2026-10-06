@@ -94,3 +94,26 @@ class ChangesCache(Base):
     change_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     snapshot_json: Mapped[str] = mapped_column(Text)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+
+
+class GroupChat(Base):
+    """Групповой чат, куда добавлен бот (для уведомлений о заменах)."""
+
+    __tablename__ = "group_chats"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    chat_id: Mapped[int] = mapped_column(BigInteger, unique=True, index=True)
+    title: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+
+
+class HomeworkFile(Base):
+    """Файл, прикреплённый к домашнему заданию (их может быть несколько)."""
+
+    __tablename__ = "homework_files"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    homework_id: Mapped[int] = mapped_column(Integer, index=True)
+    file_id: Mapped[str] = mapped_column(String(256))
+    file_type: Mapped[str] = mapped_column(String(16))  # photo | document
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
