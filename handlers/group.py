@@ -47,19 +47,30 @@ async def _clear_media(bot, chat_id: int) -> None:
             pass
 
 
+async def _remember(chat) -> None:
+    """Запоминает группу, чтобы сюда приходили уведомления о заменах."""
+    try:
+        await crud.add_group_chat(chat.id, getattr(chat, "title", None))
+    except Exception:
+        pass
+
+
 async def _send_group_menu(message: Message) -> None:
+    await _remember(message.chat)
     await message.answer(WELCOME, reply_markup=group_menu())
 
 
 async def _show_homework(
     bot,
-    chat_id: int,
+    chat,
     target,
     label: str,
     items: list,
     menu_message: Message | None = None,
 ) -> None:
     """Показывает ДЗ: текст (в меню или новым сообщением) плюс вложения."""
+    await _remember(chat)
+    chat_id = chat.id
     now = datetime.now(TZ)
     items = [hw for hw, passed in annotate_homework(items, now) if not passed]
 
@@ -114,14 +125,14 @@ async def group_menu_cmd(msg: Message) -> None:
 async def group_today_cmd(msg: Message) -> None:
     target = datetime.now(TZ).date()
     items = await crud.list_homework_on(target)
-    await _show_homework(msg.bot, msg.chat.id, target, "сегодня", items)
+    await _show_homework(msg.bot, msg.chat, target, "сегодня", items)
 
 
 @group_router.message(Command("tomorrow"))
 async def group_tomorrow_cmd(msg: Message) -> None:
     target = datetime.now(TZ).date() + timedelta(days=1)
     items = await crud.list_homework_on(target)
-    await _show_homework(msg.bot, msg.chat.id, target, "завтра", items)
+    await _show_homework(msg.bot, msg.chat, target, "завтра", items)
 
 
 # ---------------------------------------------------------------------------
@@ -133,7 +144,7 @@ async def grp_today(cq: CallbackQuery) -> None:
     target = datetime.now(TZ).date()
     items = await crud.list_homework_on(target)
     await _show_homework(
-        cq.bot, cq.message.chat.id, target, "сегодня", items, menu_message=cq.message
+        cq.bot, cq.message.chat, target, "сегодня", items, menu_message=cq.message
     )
 
 
@@ -143,5 +154,5 @@ async def grp_tomorrow(cq: CallbackQuery) -> None:
     target = datetime.now(TZ).date() + timedelta(days=1)
     items = await crud.list_homework_on(target)
     await _show_homework(
-        cq.bot, cq.message.chat.id, target, "завтра", items, menu_message=cq.message
+        cq.bot, cq.message.chat, target, "завтра", items, menu_message=cq.message
     )
