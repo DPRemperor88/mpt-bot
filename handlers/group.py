@@ -20,7 +20,7 @@ from aiogram.types import CallbackQuery, ChatMemberUpdated, Message
 from config import GROUP_NAME, TZ
 from database import crud
 from keyboards import group_menu
-from services import send_homework_media
+from services import annotate_homework, send_homework_media
 from utils import render_group_homework
 
 group_router = Router()
@@ -60,6 +60,9 @@ async def _show_homework(
     menu_message: Message | None = None,
 ) -> None:
     """Показывает ДЗ: текст (в меню или новым сообщением) плюс вложения."""
+    now = datetime.now(TZ)
+    items = [hw for hw, passed in await annotate_homework(items, now) if not passed]
+
     text = render_group_homework(items, target, label)
 
     if menu_message is not None:

@@ -6,13 +6,13 @@ from __future__ import annotations
 
 import asyncio
 import json
-from datetime import date
+from datetime import date, datetime
 
 import parser as schedule_parser
 import parser_changes
-from config import GROUP_NAME
+from config import CALL_SCHEDULE, GROUP_NAME, TZ
 from database import crud
-from utils import format_date_ru
+from utils import OTHER_WEEK, format_date_ru, normalize_subject
 
 
 # ---------------------------------------------------------------------------
@@ -36,6 +36,60 @@ async def refresh_schedule() -> dict:
         data["anchor_week"],
     )
     return data
+
+
+# ---------------------------------------------------------------------------
+# Автозакрытие ДЗ
+# ---------------------------------------------------------------------------
+def _pair_start(time_range: str) -> tuple[int, int] | None:
+    """Время начала пары из строки вида '8.30-10.00'."""
+    head = (time_range or "").split("-")[0].strip().replace(".", ":")
+    parts = head.split(":")
+    if len(parts) != 2 or not all(p.isdigit() for p in parts):
+        return None
+    return int(parts[0]), int(parts[1])
+
+
+def lesson_start(schedule: dict, target: date, subject: str) -> datetime | None:
+    """Дата и время начала пары по дисциплине в указанный день."""
+    anchor = date.fromisoformat(schedule["anchor_date"])
+    week = schedule_parser.week_type_for(target, anchor, schedule["anchor_week"])
+    lessons = schedule.get("days", {}).get(str(target.weekday()), [])
+    key = normalize_subject(subject)
+
+    for lesson in lessons:
+        variants = lesson.get("variants", {})
+        variant = variants.get(week) or variants.get(OTHER_WEEK.get(week))
+        if not variant:
+            continue
+        if normalize_subject(variant.get("subject")) != key:
+            continue
+        parsed = _pair_start(CALL_SCHEDULE.get(lesson.get("number"), ""))
+        if parsed is None:
+            continue
+        hour, minute = parsed
+        return datetime(target.year, target.month, target.day, hour, minute, tzinfo=TZ)
+    return None
+
+
+async def annotate_homework(items: list, now: datetime) -> list[tuple]:
+    """
+    Дополняет каждое ДЗ признаком «пара по этой дисциплине уже началась».
+    Такие задания закрываются в разделе ДЗ, но остаются в расписании.
+    """
+    if not items:
+        return []
+    try:
+        schedule = await ensure_schedule()
+    except Exception:
+        # расписание недоступно — считаем, что ничего не закрыто
+        return [(hw, False) for hw in items]
+
+    result = []
+    for hw in items:
+        started = lesson_start(schedule, hw.due_date, hw.subject)
+        result.append((hw, started is not None and now >= started))
+    return result
 
 
 async def get_subjects() -> list[str]:

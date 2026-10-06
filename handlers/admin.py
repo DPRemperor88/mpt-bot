@@ -24,7 +24,13 @@ from keyboards import (
     due_date_choose_keyboard,
     subjects_choose_keyboard,
 )
-from services import broadcast, get_role, get_subjects, notify_new_homework
+from services import (
+    annotate_homework,
+    broadcast,
+    get_role,
+    get_subjects,
+    notify_new_homework,
+)
 from utils import DAY_RU_SHORT, esc, format_date_ru, format_date_short
 from .states import AddHomework, AddModerator, Broadcast
 
@@ -275,16 +281,21 @@ async def _render_hw_list(cq: CallbackQuery) -> None:
         await _screen(cq, "Домашних заданий пока нет.")
         return
 
+    pairs = await annotate_homework(list(items), datetime.now(TZ))
+
     lines = ["<b>Домашние задания (последние 20):</b>"]
-    for hw in items:
-        status = "[активно]" if hw.is_active else "[завершено]"
+    buttons = []
+    for hw, passed in pairs:
+        if not hw.is_active:
+            status = "[завершено]"
+        elif passed:
+            status = "[истекло]"
+        else:
+            status = "[активно]"
         lines.append(
             f"\n{status} <b>#{hw.id}</b> {hw.subject} — {hw.text[:90]} "
             f"(до {format_date_ru(hw.due_date)})"
         )
-
-    buttons = []
-    for hw in items:
         if hw.is_active:
             buttons.append(
                 [InlineKeyboardButton(text=f"Завершить #{hw.id}", callback_data=f"hwact:{hw.id}")]

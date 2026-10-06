@@ -19,7 +19,12 @@ import ui
 from config import ADMIN_IDS, CALL_SCHEDULE, GROUP_NAME, TZ
 from database import crud
 from keyboards import main_menu
-from services import ensure_schedule, get_changes_map, send_homework_media
+from services import (
+    annotate_homework,
+    ensure_schedule,
+    get_changes_map,
+    send_homework_media,
+)
 from utils import (
     format_date_ru,
     normalize_subject,
@@ -151,8 +156,10 @@ async def homework_list(msg: Message) -> None:
     chat_id = msg.chat.id
     await ui.delete_safe(msg.bot, chat_id, msg.message_id)
 
-    today = datetime.now(TZ).date()
-    items = await crud.list_active_homework(today)
+    now = datetime.now(TZ)
+    items = await crud.list_active_homework(now.date())
+    # задания, пара по которым уже началась, в разделе ДЗ не показываем
+    items = [hw for hw, passed in await annotate_homework(items, now) if not passed]
 
     await ui.clear(msg.bot, chat_id, user_id)
     if not items:
