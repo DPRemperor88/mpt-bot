@@ -75,7 +75,8 @@ async def _greet(msg: Message, greeting: bool) -> None:
         text = "Главное меню:"
 
     await ui.delete_safe(msg.bot, msg.chat.id, msg.message_id)
-    await ui.show(msg.bot, msg.chat.id, tg.id, text, reply_markup=main_menu(privileged))
+    await ui.clear(msg.bot, msg.chat.id, tg.id)
+    await ui.set_menu(msg.bot, msg.chat.id, tg.id, text, main_menu(privileged))
 
 
 # ---------------------------------------------------------------------------

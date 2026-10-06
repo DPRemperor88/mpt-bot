@@ -1,8 +1,13 @@
 """
-ui.py — состояние интерфейса: один актуальный экран на пользователя.
+ui.py — состояние интерфейса.
 
-Экран может состоять из нескольких сообщений (список ДЗ плюс прикреплённые
-файлы). При переключении раздела предыдущий экран удаляется целиком.
+Экран — это сообщения с содержимым раздела (расписание, ДЗ, панель). При
+переключении раздела предыдущий экран удаляется целиком.
+
+Отдельно живёт сообщение, несущее reply-клавиатуру (нижнее меню). Его удалять
+нельзя: Telegram прячет клавиатуру, если исчезает сообщение, которым она была
+установлена. Поэтому меню держится на постоянном сообщении, а разделы
+переключаются ниже.
 """
 from __future__ import annotations
 
@@ -12,8 +17,11 @@ from aiogram import Bot
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import InlineKeyboardMarkup, Message
 
-# user_id -> id сообщений текущего экрана
+# user_id -> id сообщений текущего экрана (содержимое раздела)
 _views: dict[int, list[int]] = {}
+
+# user_id -> id сообщения, несущего reply-клавиатуру
+_menus: dict[int, int] = {}
 
 # Пустая клавиатура: снимает инлайн-кнопки при редактировании.
 EMPTY_KB = InlineKeyboardMarkup(inline_keyboard=[])
@@ -36,6 +44,25 @@ async def clear(bot: Bot, chat_id: int, user_id: int) -> None:
     """Удалить все сообщения текущего экрана."""
     for message_id in _views.pop(user_id, []):
         await delete_safe(bot, chat_id, message_id)
+
+
+async def set_menu(
+    bot: Bot,
+    chat_id: int,
+    user_id: int,
+    text: str,
+    reply_markup: Any,
+) -> Message:
+    """
+    Отправить сообщение с нижним меню. Предыдущее такое сообщение заменяется.
+    Это сообщение не входит в экран и не удаляется при смене раздела.
+    """
+    previous = _menus.get(user_id)
+    if previous is not None:
+        await delete_safe(bot, chat_id, previous)
+    sent = await bot.send_message(chat_id, text, reply_markup=reply_markup)
+    _menus[user_id] = sent.message_id
+    return sent
 
 
 async def show(
