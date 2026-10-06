@@ -6,6 +6,7 @@ handlers/group.py — работа бота в групповом чате:
   * кнопки «ДЗ на сегодня» / «ДЗ на завтра».
 
 В группе доступны ТОЛЬКО домашние задания (без расписания).
+Вложения ДЗ отправляются вместе с текстом; предыдущие вложения удаляются.
 """
 from __future__ import annotations
 
@@ -19,6 +20,7 @@ from aiogram.types import CallbackQuery, ChatMemberUpdated, Message
 from config import GROUP_NAME, TZ
 from database import crud
 from keyboards import group_menu
+from services import send_homework_media
 from utils import render_group_homework
 
 group_router = Router()
@@ -33,19 +35,43 @@ WELCOME = (
     "Расписание доступно в личном чате с ботом."
 )
 
+# chat_id -> id сообщений с вложениями (чтобы подчищать предыдущую выдачу)
+_media: dict[int, list[int]] = {}
+
+
+async def _clear_media(bot, chat_id: int) -> None:
+    for message_id in _media.pop(chat_id, []):
+        try:
+            await bot.delete_message(chat_id, message_id)
+        except Exception:
+            pass
+
 
 async def _send_group_menu(message: Message) -> None:
     await message.answer(WELCOME, reply_markup=group_menu())
 
 
-async def _show_homework(cq: CallbackQuery, offset: int) -> None:
-    target = datetime.now(TZ).date() + timedelta(days=offset)
-    label = "сегодня" if offset == 0 else "завтра"
-    items = await crud.list_homework_on(target)
-    await cq.message.edit_text(
-        render_group_homework(items, target, label),
-        reply_markup=group_menu(),
-    )
+async def _show_homework(
+    bot,
+    chat_id: int,
+    target,
+    label: str,
+    items: list,
+    menu_message: Message | None = None,
+) -> None:
+    """Показывает ДЗ: текст (в меню или новым сообщением) плюс вложения."""
+    text = render_group_homework(items, target, label)
+
+    if menu_message is not None:
+        await menu_message.edit_text(text, reply_markup=group_menu())
+    else:
+        await bot.send_message(chat_id, text, reply_markup=group_menu())
+
+    await _clear_media(bot, chat_id)
+    ids: list[int] = []
+    for hw in items:
+        ids.extend(await send_homework_media(bot, chat_id, hw))
+    _media[chat_id] = ids
 
 
 # ---------------------------------------------------------------------------
@@ -80,20 +106,14 @@ async def group_menu_cmd(msg: Message) -> None:
 async def group_today_cmd(msg: Message) -> None:
     target = datetime.now(TZ).date()
     items = await crud.list_homework_on(target)
-    await msg.answer(
-        render_group_homework(items, target, "сегодня"),
-        reply_markup=group_menu(),
-    )
+    await _show_homework(msg.bot, msg.chat.id, target, "сегодня", items)
 
 
 @group_router.message(Command("tomorrow"))
 async def group_tomorrow_cmd(msg: Message) -> None:
     target = datetime.now(TZ).date() + timedelta(days=1)
     items = await crud.list_homework_on(target)
-    await msg.answer(
-        render_group_homework(items, target, "завтра"),
-        reply_markup=group_menu(),
-    )
+    await _show_homework(msg.bot, msg.chat.id, target, "завтра", items)
 
 
 # ---------------------------------------------------------------------------
@@ -102,10 +122,18 @@ async def group_tomorrow_cmd(msg: Message) -> None:
 @group_router.callback_query(F.data == "grp:today")
 async def grp_today(cq: CallbackQuery) -> None:
     await cq.answer()
-    await _show_homework(cq, 0)
+    target = datetime.now(TZ).date()
+    items = await crud.list_homework_on(target)
+    await _show_homework(
+        cq.bot, cq.message.chat.id, target, "сегодня", items, menu_message=cq.message
+    )
 
 
 @group_router.callback_query(F.data == "grp:tomorrow")
 async def grp_tomorrow(cq: CallbackQuery) -> None:
     await cq.answer()
-    await _show_homework(cq, 1)
+    target = datetime.now(TZ).date() + timedelta(days=1)
+    items = await crud.list_homework_on(target)
+    await _show_homework(
+        cq.bot, cq.message.chat.id, target, "завтра", items, menu_message=cq.message
+    )

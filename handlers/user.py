@@ -3,7 +3,8 @@ handlers/user.py — хэндлеры обычного пользователя 
   /start (приветствие с Telegram ID), /menu, «Расписание на сегодня/завтра»,
   «Домашнее задание».
 
-Все разделы показываются в одном сообщении: предыдущий экран удаляется.
+Разделы показываются в одном экране: предыдущий удаляется. Если у ДЗ есть
+вложение, оно отправляется вместе с текстом.
 """
 from __future__ import annotations
 
@@ -18,8 +19,13 @@ import ui
 from config import ADMIN_IDS, CALL_SCHEDULE, GROUP_NAME, TZ
 from database import crud
 from keyboards import main_menu
-from services import active_hw_map, ensure_schedule, get_changes_map
-from utils import format_date_ru, render_homework_list, render_schedule_text
+from services import ensure_schedule, get_changes_map, send_homework_media
+from utils import (
+    format_date_ru,
+    normalize_subject,
+    render_homework_list,
+    render_schedule_text,
+)
 
 user_router = Router()
 
@@ -104,10 +110,35 @@ async def _send_schedule(msg: Message, offset: int) -> None:
         await ui.show(msg.bot, chat_id, user_id, header + "\n\n—")
         return
 
-    hw_by_subject = await active_hw_map(target)
+    # Последнее активное ДЗ по каждой дисциплине.
+    homework: dict[str, object] = {}
+    for hw in await crud.list_active_homework(target):
+        homework.setdefault(normalize_subject(hw.subject), hw)
+
+    display = {
+        key: (hw.text.strip() or "(вложение)")
+        for key, hw in homework.items()
+    }
+
     changes_map = await get_changes_map(target)
-    body = render_schedule_text(lessons, week, CALL_SCHEDULE, hw_by_subject, changes_map)
-    await ui.show(msg.bot, chat_id, user_id, header + "\n\n" + body)
+    body = render_schedule_text(lessons, week, CALL_SCHEDULE, display, changes_map)
+
+    await ui.clear(msg.bot, chat_id, user_id)
+    sent = await msg.bot.send_message(chat_id, header + "\n\n" + body)
+    ids = [sent.message_id]
+
+    # Вложения ДЗ по дисциплинам этого дня (каждое по одному разу).
+    seen: set[int] = set()
+    for lesson in lessons:
+        variant = lesson.get("variants", {}).get(week)
+        if not variant:
+            continue
+        hw = homework.get(normalize_subject(variant.get("subject")))
+        if hw is not None and hw.id not in seen:
+            seen.add(hw.id)
+            ids.extend(await send_homework_media(msg.bot, chat_id, hw))
+
+    ui.track(user_id, ids)
 
 
 # ---------------------------------------------------------------------------
@@ -121,7 +152,14 @@ async def homework_list(msg: Message) -> None:
 
     today = datetime.now(TZ).date()
     items = await crud.list_active_homework(today)
+
+    await ui.clear(msg.bot, chat_id, user_id)
     if not items:
         await ui.show(msg.bot, chat_id, user_id, "Активных домашних заданий нет.")
         return
-    await ui.show(msg.bot, chat_id, user_id, render_homework_list(items))
+
+    sent = await msg.bot.send_message(chat_id, render_homework_list(items))
+    ids = [sent.message_id]
+    for hw in items:
+        ids.extend(await send_homework_media(msg.bot, chat_id, hw))
+    ui.track(user_id, ids)

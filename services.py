@@ -12,7 +12,7 @@ import parser as schedule_parser
 import parser_changes
 from config import GROUP_NAME
 from database import crud
-from utils import format_date_ru, normalize_subject
+from utils import format_date_ru
 
 
 # ---------------------------------------------------------------------------
@@ -42,20 +42,6 @@ async def get_subjects() -> list[str]:
     """Список дисциплин группы (для выбора при добавлении ДЗ)."""
     data = await ensure_schedule()
     return schedule_parser.subjects_from_schedule(data)
-
-
-async def active_hw_map(today: date) -> dict[str, str]:
-    """
-    Карта «нормализованное название дисциплины → текст последнего активного ДЗ».
-    Используется для подстановки строки «ДЗ: …» в расписание.
-    """
-    items = await crud.list_active_homework(today)
-    result: dict[str, str] = {}
-    for hw in items:
-        key = normalize_subject(hw.subject)
-        if key not in result:  # список уже отсортирован по свежести
-            result[key] = hw.text
-    return result
 
 
 async def get_changes_map(query_date: date) -> dict[int, str]:
@@ -168,6 +154,24 @@ async def notify_new_homework(bot, hw) -> None:
     )
     media = (hw.media_file_id, hw.media_type) if (hw.media_file_id and hw.media_type) else None
     await broadcast(bot, text, media)
+
+
+async def send_homework_media(bot, chat_id: int, hw) -> list[int]:
+    """
+    Отправляет вложение домашнего задания (фото или файл) в указанный чат.
+    Возвращает id отправленных сообщений; пустой список, если вложения нет.
+    """
+    if not hw.media_file_id:
+        return []
+    try:
+        if hw.media_type == "photo":
+            sent = await bot.send_photo(chat_id, hw.media_file_id, caption=hw.subject)
+        else:
+            sent = await bot.send_document(chat_id, hw.media_file_id, caption=hw.subject)
+    except Exception:
+        # файл недоступен (удалён или устарел) — выдачу не роняем
+        return []
+    return [sent.message_id]
 
 
 # ---------------------------------------------------------------------------

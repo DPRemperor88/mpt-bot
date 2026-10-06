@@ -46,6 +46,7 @@ def admin_menu(is_admin: bool = False) -> InlineKeyboardMarkup:
     rows = [
         [InlineKeyboardButton(text="Добавить ДЗ", callback_data="adm:add_hw")],
         [InlineKeyboardButton(text="Список ДЗ", callback_data="adm:list_hw")],
+        [InlineKeyboardButton(text="Участники", callback_data="adm:users")],
     ]
     if is_admin:
         rows.append(

@@ -25,7 +25,7 @@ from keyboards import (
     subjects_choose_keyboard,
 )
 from services import broadcast, get_role, get_subjects, notify_new_homework
-from utils import DAY_RU_SHORT, format_date_ru, format_date_short
+from utils import DAY_RU_SHORT, esc, format_date_ru, format_date_short
 from .states import AddHomework, AddModerator, Broadcast
 
 admin_router = Router()
@@ -45,7 +45,7 @@ async def _require_role(user_id: int, roles: tuple[str, ...]) -> str | None:
 
 async def _screen(cq: CallbackQuery, text: str, reply_markup=None) -> None:
     """Показать экран в том сообщении, где нажата кнопка."""
-    ui.track(cq.from_user.id, cq.message.message_id)
+    ui.track(cq.from_user.id, [cq.message.message_id])
     await ui.update(
         cq.bot,
         cq.message.chat.id,
@@ -211,7 +211,9 @@ async def add_hw_photo(msg: Message, state: FSMContext) -> None:
 
 @admin_router.message(AddHomework.text, F.document)
 async def add_hw_document(msg: Message, state: FSMContext) -> None:
-    await _save_homework(msg, state, text=msg.caption, media=(msg.document.file_id, "document"))
+    # без подписи берём имя файла, чтобы задание не осталось без описания
+    text = msg.caption or msg.document.file_name
+    await _save_homework(msg, state, text=text, media=(msg.document.file_id, "document"))
 
 
 async def _save_homework(
@@ -313,6 +315,38 @@ async def hw_delete(cq: CallbackQuery) -> None:
     hw_id = int(cq.data.split(":", 1)[1])
     await crud.delete_homework(hw_id)
     await _render_hw_list(cq)
+
+
+# ---------------------------------------------------------------------------
+# Участники
+# ---------------------------------------------------------------------------
+@admin_router.callback_query(F.data == "adm:users")
+async def list_users_cb(cq: CallbackQuery) -> None:
+    await cq.answer()
+    if await _require_role(cq.from_user.id, MODERATOR_ROLES) is None:
+        await _screen(cq, "Недостаточно прав.")
+        return
+    await _render_users(cq)
+
+
+async def _render_users(cq: CallbackQuery) -> None:
+    users = await crud.list_users()
+    if not users:
+        await _screen(cq, "Пользователей пока нет.")
+        return
+
+    roles = {"admin": "админ", "moderator": "модератор", "student": "студент"}
+    lines = [f"<b>Участники: {len(users)}</b>", ""]
+    for i, u in enumerate(users[:40], start=1):
+        name = esc(u.full_name or "без имени")
+        username = f" @{esc(u.username)}" if u.username else ""
+        role = roles.get(u.role, esc(u.role))
+        lines.append(f"{i}. {name}{username} — <code>{u.telegram_id}</code> ({role})")
+    if len(users) > 40:
+        lines.append(f"\nпоказаны первые 40 из {len(users)}")
+
+    buttons = [[InlineKeyboardButton(text="Назад", callback_data="adm:menu")]]
+    await _screen(cq, "\n".join(lines), InlineKeyboardMarkup(inline_keyboard=buttons))
 
 
 # ---------------------------------------------------------------------------
