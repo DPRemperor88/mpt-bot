@@ -281,7 +281,7 @@ async def _render_hw_list(cq: CallbackQuery) -> None:
         await _screen(cq, "Домашних заданий пока нет.")
         return
 
-    pairs = await annotate_homework(list(items), datetime.now(TZ))
+    pairs = annotate_homework(list(items), datetime.now(TZ))
 
     lines = ["<b>Домашние задания (последние 20):</b>"]
     buttons = []

@@ -61,7 +61,7 @@ async def _show_homework(
 ) -> None:
     """Показывает ДЗ: текст (в меню или новым сообщением) плюс вложения."""
     now = datetime.now(TZ)
-    items = [hw for hw, passed in await annotate_homework(items, now) if not passed]
+    items = [hw for hw, passed in annotate_homework(items, now) if not passed]
 
     text = render_group_homework(items, target, label)
 

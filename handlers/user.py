@@ -159,7 +159,7 @@ async def homework_list(msg: Message) -> None:
     now = datetime.now(TZ)
     items = await crud.list_active_homework(now.date())
     # задания, пара по которым уже началась, в разделе ДЗ не показываем
-    items = [hw for hw, passed in await annotate_homework(items, now) if not passed]
+    items = [hw for hw, passed in annotate_homework(items, now) if not passed]
 
     await ui.clear(msg.bot, chat_id, user_id)
     if not items:
