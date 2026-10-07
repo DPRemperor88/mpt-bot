@@ -6,13 +6,13 @@ from __future__ import annotations
 
 import asyncio
 import json
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 import parser as schedule_parser
 import parser_changes
 from config import GROUP_NAME, HOMEWORK_CLOSE_HOUR, TZ
 from database import crud
-from utils import format_date_ru
+from utils import OTHER_WEEK, format_date_ru, normalize_subject
 
 
 # ---------------------------------------------------------------------------
@@ -36,6 +36,43 @@ async def refresh_schedule() -> dict:
         data["anchor_week"],
     )
     return data
+
+
+# ---------------------------------------------------------------------------
+# Дни, когда у дисциплины есть пара
+# ---------------------------------------------------------------------------
+def subject_pair_number(schedule: dict, target: date, subject: str) -> int | None:
+    """Номер пары по дисциплине в указанный день (None, если пары нет)."""
+    anchor = date.fromisoformat(schedule["anchor_date"])
+    week = schedule_parser.week_type_for(target, anchor, schedule["anchor_week"])
+    lessons = schedule.get("days", {}).get(str(target.weekday()), [])
+    key = normalize_subject(subject)
+
+    for lesson in lessons:
+        variants = lesson.get("variants", {})
+        variant = variants.get(week) or variants.get(OTHER_WEEK.get(week))
+        if not variant:
+            continue
+        if normalize_subject(variant.get("subject")) == key:
+            return lesson.get("number")
+    return None
+
+
+async def subject_lesson_days(subject: str, horizon: int = 14) -> list[tuple[date, int]]:
+    """
+    Ближайшие дни, когда у дисциплины есть пара: список (дата, номер пары).
+    Горизонт по умолчанию — две недели, чтобы попали обе недели цикла.
+    """
+    schedule = await ensure_schedule()
+    today = datetime.now(TZ).date()
+
+    result: list[tuple[date, int]] = []
+    for offset in range(horizon):
+        target = today + timedelta(days=offset)
+        number = subject_pair_number(schedule, target, subject)
+        if number is not None:
+            result.append((target, number))
+    return result
 
 
 # ---------------------------------------------------------------------------

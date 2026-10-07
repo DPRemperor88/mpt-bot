@@ -33,6 +33,7 @@ from services import (
     get_role,
     get_subjects,
     notify_new_homework,
+    subject_lesson_days,
 )
 from utils import DAY_RU_SHORT, esc, format_date_ru, format_date_short
 from .states import AddHomework, AddModerator, Broadcast
@@ -108,20 +109,39 @@ async def admin_close(cq: CallbackQuery) -> None:
 # ---------------------------------------------------------------------------
 # Добавление ДЗ (FSM)
 # ---------------------------------------------------------------------------
-def _due_date_options() -> tuple[str, list[tuple[str, str]]]:
-    """Текст шага 2 и список ближайших дат."""
+async def _due_date_options(subject: str) -> tuple[str, list[tuple[str, str]]]:
+    """
+    Текст шага 2 и даты сдачи: только дни, когда у дисциплины есть пара.
+    Если расписание недоступно или предмет не найден — ближайшие 7 дней.
+    """
     today = datetime.now(TZ).date()
+
+    try:
+        lesson_days = await subject_lesson_days(subject)
+    except Exception:
+        # расписание недоступно — не блокируем добавление ДЗ
+        lesson_days = []
+
+    if lesson_days:
+        prompt = "Шаг 2/3. Выберите дату сдачи (показаны дни, когда есть пара):"
+        days: list[tuple[date, int | None]] = list(lesson_days)
+    else:
+        prompt = "Шаг 2/3. Выберите дату сдачи ДЗ:"
+        days = [(today + timedelta(days=i), None) for i in range(7)]
+
     dates: list[tuple[str, str]] = []
-    for i in range(7):
-        d = today + timedelta(days=i)
-        if i == 0:
+    for d, number in days:
+        if d == today:
             label = f"Сегодня · {format_date_short(d)}"
-        elif i == 1:
+        elif d == today + timedelta(days=1):
             label = f"Завтра · {format_date_short(d)}"
         else:
             label = f"{format_date_short(d)} · {DAY_RU_SHORT[d.weekday()]}"
+        if number:
+            label += f" · {number}-я пара"
         dates.append((d.isoformat(), label))
-    return "Шаг 2/3. Выберите дату сдачи ДЗ:", dates
+
+    return prompt, dates
 
 
 @admin_router.callback_query(F.data == "adm:add_hw")
@@ -156,7 +176,7 @@ async def add_hw_subject_cb(cq: CallbackQuery, state: FSMContext) -> None:
         await _screen(cq, "Ошибка выбора, попробуйте ещё раз.")
         return
 
-    text, dates = _due_date_options()
+    text, dates = await _due_date_options(subject)
     await state.update_data(subject=subject, due_dates=[iso for iso, _ in dates])
     await _screen(cq, text, due_date_choose_keyboard(dates))
     await state.set_state(AddHomework.due_date)
@@ -176,7 +196,7 @@ async def add_hw_subject_manual(msg: Message, state: FSMContext) -> None:
         )
         return
 
-    text, dates = _due_date_options()
+    text, dates = await _due_date_options(subject)
     await state.update_data(subject=subject, due_dates=[iso for iso, _ in dates])
     await ui.update(
         msg.bot,
