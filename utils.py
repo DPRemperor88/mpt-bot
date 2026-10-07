@@ -37,6 +37,14 @@ def format_date_short(d: date) -> str:
     return f"{d.day:02d}.{d.month:02d}"
 
 
+def shorten(text: str, limit: int = 30) -> str:
+    """Обрезает длинный текст для подписи кнопки."""
+    value = (text or "").strip()
+    if len(value) <= limit:
+        return value
+    return value[: limit - 1].rstrip() + "…"
+
+
 def render_schedule_text(
     lessons: list,
     week: str,

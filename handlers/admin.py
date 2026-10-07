@@ -35,7 +35,7 @@ from services import (
     notify_new_homework,
     subject_lesson_days,
 )
-from utils import DAY_RU_SHORT, esc, format_date_ru, format_date_short
+from utils import DAY_RU_SHORT, esc, format_date_ru, format_date_short, shorten
 from .states import AddHomework, AddModerator, Broadcast
 
 admin_router = Router()
@@ -351,29 +351,20 @@ async def _render_hw_list(cq: CallbackQuery) -> None:
         else:
             status = "[активно]"
         lines.append(
-            f"\n{status} <b>#{hw.id}</b> {hw.subject} — {hw.text[:90]} "
+            f"\n{status} <b>{esc(hw.subject)}</b> — {esc(hw.text[:90])} "
             f"(до {format_date_ru(hw.due_date)})"
         )
-        if hw.is_active:
-            buttons.append(
-                [InlineKeyboardButton(text=f"Завершить #{hw.id}", callback_data=f"hwact:{hw.id}")]
-            )
         buttons.append(
-            [InlineKeyboardButton(text=f"Удалить #{hw.id}", callback_data=f"hwdel:{hw.id}")]
+            [
+                InlineKeyboardButton(
+                    text=f"Удалить {shorten(hw.subject)}",
+                    callback_data=f"hwdel:{hw.id}",
+                )
+            ]
         )
     buttons.append([InlineKeyboardButton(text="Назад", callback_data="adm:menu")])
 
     await _screen(cq, "\n".join(lines), InlineKeyboardMarkup(inline_keyboard=buttons))
-
-
-@admin_router.callback_query(F.data.startswith("hwact:"))
-async def hw_complete(cq: CallbackQuery) -> None:
-    await cq.answer()
-    if await _require_role(cq.from_user.id, MODERATOR_ROLES) is None:
-        return
-    hw_id = int(cq.data.split(":", 1)[1])
-    await crud.set_homework_active(hw_id, False)
-    await _render_hw_list(cq)
 
 
 @admin_router.callback_query(F.data.startswith("hwdel:"))
