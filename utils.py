@@ -85,6 +85,15 @@ def render_schedule_text(
     return "\n".join(lines).strip()
 
 
+def _homework_body(hw, with_files: set[int]) -> str:
+    """Текст задания с пометкой, если есть вложение."""
+    text = esc(hw.text).strip()
+    has_file = bool(hw.media_file_id) or hw.id in with_files
+    if text:
+        return f"{text} (вложение)" if has_file else text
+    return "(вложение)" if has_file else "—"
+
+
 def render_homework_day(
     items: list,
     target: date,
@@ -104,11 +113,23 @@ def render_homework_day(
 
     lines = [header, ""]
     for hw in items:
-        text = esc(hw.text).strip()
-        has_file = bool(hw.media_file_id) or hw.id in with_files
-        if text:
-            body = f"{text} (вложение)" if has_file else text
-        else:
-            body = "(вложение)" if has_file else "—"
-        lines.append(f"• <b>{esc(hw.subject)}</b> — {body}")
+        lines.append(f"• <b>{esc(hw.subject)}</b> — {_homework_body(hw, with_files)}")
+    return "\n".join(lines)
+
+
+def render_homework_all(items: list, with_files: set[int] | None = None) -> str:
+    """Список всех предстоящих ДЗ, сгруппированный по дате сдачи."""
+    with_files = with_files or set()
+
+    header = "<b>Все задания:</b>"
+    if not items:
+        return f"{header}\n\nЗаданий нет."
+
+    lines = [header]
+    current: date | None = None
+    for hw in items:
+        if hw.due_date != current:
+            current = hw.due_date
+            lines.append(f"\n<b>{format_date_ru(current)}</b>")
+        lines.append(f"• {esc(hw.subject)} — {_homework_body(hw, with_files)}")
     return "\n".join(lines)

@@ -101,6 +101,18 @@ async def list_homework_on(due_date: date) -> list[Homework]:
         return list(res.scalars().all())
 
 
+async def list_upcoming_homework(on_date: date, limit: int = 30) -> list[Homework]:
+    """Активные ДЗ со сроком не раньше указанной даты, по возрастанию срока."""
+    async with SessionLocal() as s:
+        res = await s.execute(
+            select(Homework)
+            .where(Homework.is_active.is_(True), Homework.due_date >= on_date)
+            .order_by(Homework.due_date.asc(), Homework.subject.asc())
+            .limit(limit)
+        )
+        return list(res.scalars().all())
+
+
 async def list_homework(limit: int = 30) -> list[Homework]:
     """Все ДЗ (для админ-панели), последние сверху."""
     async with SessionLocal() as s:

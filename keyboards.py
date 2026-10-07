@@ -25,6 +25,7 @@ def main_menu(is_privileged: bool = False) -> ReplyKeyboardMarkup:
             KeyboardButton(text="ДЗ на сегодня"),
             KeyboardButton(text="ДЗ на завтра"),
         ],
+        [KeyboardButton(text="Все ДЗ")],
     ]
     if is_privileged:
         keyboard.append([KeyboardButton(text="Админ-панель")])

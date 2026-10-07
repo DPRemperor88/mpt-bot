@@ -28,6 +28,7 @@ from services import (
 from utils import (
     format_date_ru,
     normalize_subject,
+    render_homework_all,
     render_homework_day,
     render_schedule_text,
 )
@@ -160,6 +161,30 @@ async def homework_today(msg: Message) -> None:
 @user_router.message(F.text == "ДЗ на завтра")
 async def homework_tomorrow(msg: Message) -> None:
     await _send_homework(msg, 1)
+
+
+@user_router.message(F.text == "Все ДЗ")
+async def homework_all(msg: Message) -> None:
+    user_id = msg.from_user.id
+    chat_id = msg.chat.id
+    await ui.delete_safe(msg.bot, chat_id, msg.message_id)
+
+    now = datetime.now(TZ)
+    items = await crud.list_upcoming_homework(now.date())
+    # закрытые не показываем
+    items = [hw for hw, passed in annotate_homework(items, now) if not passed]
+    with_files = await crud.homework_ids_with_files([hw.id for hw in items])
+
+    await ui.clear(msg.bot, chat_id, user_id)
+    if not items:
+        await ui.show(msg.bot, chat_id, user_id, "Заданий нет.")
+        return
+
+    sent = await msg.bot.send_message(chat_id, render_homework_all(items, with_files))
+    ids = [sent.message_id]
+    for hw in items:
+        ids.extend(await send_homework_media(msg.bot, chat_id, hw))
+    ui.track(user_id, ids)
 
 
 @user_router.message(F.text == "Домашнее задание")
