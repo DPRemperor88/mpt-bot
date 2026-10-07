@@ -13,6 +13,7 @@ from __future__ import annotations
 from datetime import date, datetime, timedelta
 
 from aiogram import F, Router
+from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
 
@@ -23,6 +24,7 @@ from keyboards import (
     admin_menu,
     due_date_choose_keyboard,
     hw_text_keyboard,
+    main_menu,
     subjects_choose_keyboard,
 )
 from services import (
@@ -79,6 +81,12 @@ async def admin_panel(msg: Message) -> None:
         "Админ-панель:",
         reply_markup=admin_menu(is_admin=(role == "admin")),
     )
+
+
+@admin_router.message(Command("admin"))
+async def admin_panel_cmd(msg: Message) -> None:
+    """Открывает панель командой — на случай, если клавиатура устарела."""
+    await admin_panel(msg)
 
 
 @admin_router.callback_query(F.data == "adm:menu")
@@ -452,6 +460,17 @@ async def add_mod_handler(msg: Message, state: FSMContext) -> None:
         msg.from_user.id,
         f"Пользователь <code>{user_id}</code> назначен модератором.",
     )
+    # сразу обновляем клавиатуру: иначе кнопка панели у модератора не появится
+    try:
+        await msg.bot.send_message(
+            user_id,
+            "Вам выданы права модератора.\n"
+            "Откройте «Админ-панель» в меню: там «Список ДЗ» — завершение и удаление заданий.",
+            reply_markup=main_menu(True),
+        )
+    except Exception:
+        # пользователь ещё не начинал переписку с ботом
+        pass
 
 
 # ---------------------------------------------------------------------------

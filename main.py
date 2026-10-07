@@ -65,6 +65,7 @@ class ThrottlingMiddleware(BaseMiddleware):
 PRIVATE_COMMANDS = [
     BotCommand(command="start", description="Главное меню"),
     BotCommand(command="menu", description="Показать меню"),
+    BotCommand(command="admin", description="Админ-панель"),
 ]
 
 GROUP_COMMANDS = [
