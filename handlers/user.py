@@ -163,6 +163,12 @@ async def homework_tomorrow(msg: Message) -> None:
     await _send_homework(msg, 1)
 
 
+@user_router.message(F.text == "Домашнее задание")
+async def homework_old_button(msg: Message) -> None:
+    """Кнопка из прежней версии меню: показываем ДЗ на сегодня."""
+    await _send_homework(msg, 0)
+
+
 async def _send_homework(msg: Message, offset: int) -> None:
     user_id = msg.from_user.id
     chat_id = msg.chat.id
