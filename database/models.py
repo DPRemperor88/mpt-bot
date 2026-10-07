@@ -143,3 +143,13 @@ class NotificationSetting(Base):
     __table_args__ = (
         UniqueConstraint("telegram_id", "kind", name="uq_notify_user_kind"),
     )
+
+
+class Meta(Base):
+    """Мелкое состояние бота: ключ и значение."""
+
+    __tablename__ = "meta"
+
+    key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    value: Mapped[str] = mapped_column(Text)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)

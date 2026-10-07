@@ -19,6 +19,7 @@ from .models import (
     Homework,
     HomeworkFile,
     NotificationSetting,
+    Meta,
     ScheduleCache,
     User,
 )
@@ -372,3 +373,22 @@ async def users_for_notification(kind: str) -> list[int]:
         )
         disabled = {r.telegram_id for r in res.scalars().all() if not r.enabled}
     return [uid for uid in users if uid not in disabled]
+
+
+# ---------------------------------------------------------------------------
+# Состояние бота
+# ---------------------------------------------------------------------------
+async def get_meta(key: str) -> str | None:
+    async with SessionLocal() as s:
+        row = await s.get(Meta, key)
+    return row.value if row is not None else None
+
+
+async def set_meta(key: str, value: str) -> None:
+    async with SessionLocal() as s:
+        row = await s.get(Meta, key)
+        if row is None:
+            s.add(Meta(key=key, value=value))
+        else:
+            row.value = value
+        await s.commit()

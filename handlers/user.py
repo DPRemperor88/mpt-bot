@@ -8,30 +8,18 @@ handlers/user.py — хэндлеры обычного пользователя 
 """
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta
+from datetime import datetime, timedelta
 
 from aiogram import F, Router
 from aiogram.filters import Command, CommandStart
-from aiogram.types import Message
+from aiogram.types import CallbackQuery, Message
 
-import parser as schedule_parser
 import ui
-from config import ADMIN_IDS, CALL_SCHEDULE, GROUP_NAME, TZ
+from config import ADMIN_IDS, GROUP_NAME, TZ
 from database import crud
 from keyboards import main_menu, notifications_keyboard
-from services import (
-    annotate_homework,
-    ensure_schedule,
-    get_changes_map,
-    send_homework_media,
-)
-from utils import (
-    format_date_ru,
-    normalize_subject,
-    render_homework_all,
-    render_homework_day,
-    render_schedule_text,
-)
+from services import annotate_homework, schedule_day, send_homework_media
+from utils import render_homework_all, render_homework_day
 
 user_router = Router()
 
@@ -104,50 +92,13 @@ async def _send_schedule(msg: Message, offset: int) -> None:
     await ui.delete_safe(msg.bot, chat_id, msg.message_id)
 
     target = datetime.now(TZ).date() + timedelta(days=offset)
-
-    data = await ensure_schedule()
-    anchor_date = date.fromisoformat(data["anchor_date"])
-    week = schedule_parser.week_type_for(target, anchor_date, data["anchor_week"])
-
-    lessons = data.get("days", {}).get(str(target.weekday()), [])
-
-    header = f"<b>{format_date_ru(target)}</b>\nНеделя: <b>{week}</b>"
-
-    if not lessons:
-        await ui.show(msg.bot, chat_id, user_id, header + "\n\n—")
-        return
-
-    # В расписании показываем задания, срок сдачи которых приходится на этот день.
-    day_homework = await crud.list_homework_on(target)
-    with_files = await crud.homework_ids_with_files([hw.id for hw in day_homework])
-
-    homework: dict[str, object] = {}
-    for hw in day_homework:
-        homework.setdefault(normalize_subject(hw.subject), hw)
-
-    display = {
-        key: (hw.text.strip() or ("(вложение)" if hw.id in with_files else "—"))
-        for key, hw in homework.items()
-    }
-
-    changes_map = await get_changes_map(target)
-    body = render_schedule_text(lessons, week, CALL_SCHEDULE, display, changes_map)
+    text, day_homework = await schedule_day(target)
 
     await ui.clear(msg.bot, chat_id, user_id)
-    sent = await msg.bot.send_message(chat_id, header + "\n\n" + body)
+    sent = await msg.bot.send_message(chat_id, text)
     ids = [sent.message_id]
-
-    # Вложения заданий этого дня (каждое по одному разу).
-    seen: set[int] = set()
-    for lesson in lessons:
-        variant = lesson.get("variants", {}).get(week)
-        if not variant:
-            continue
-        hw = homework.get(normalize_subject(variant.get("subject")))
-        if hw is not None and hw.id not in seen:
-            seen.add(hw.id)
-            ids.extend(await send_homework_media(msg.bot, chat_id, hw))
-
+    for hw in day_homework:
+        ids.extend(await send_homework_media(msg.bot, chat_id, hw))
     ui.track(user_id, ids)
 
 

@@ -127,6 +127,13 @@ async def main() -> None:
         except Exception:
             logging.exception("Ошибка обновления замен")
 
+    async def job_morning() -> None:
+        try:
+            if await services.morning_post(bot):
+                logging.info("Утреннее расписание отправлено")
+        except Exception:
+            logging.exception("Ошибка утренней рассылки расписания")
+
     scheduler.add_job(
         job_schedule,
         "interval",
@@ -138,6 +145,13 @@ async def main() -> None:
         "interval",
         minutes=config.CHANGES_REFRESH_MINUTES,
         next_run_time=datetime.now() + timedelta(seconds=10),
+    )
+    # Проверка «пора отправить расписание» — каждые 5 минут
+    scheduler.add_job(
+        job_morning,
+        "interval",
+        minutes=5,
+        next_run_time=datetime.now() + timedelta(seconds=20),
     )
     scheduler.start()
 

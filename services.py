@@ -10,9 +10,14 @@ from datetime import date, datetime, timedelta
 
 import parser as schedule_parser
 import parser_changes
-from config import GROUP_NAME, HOMEWORK_CLOSE_HOUR, TZ
+from config import CALL_SCHEDULE, GROUP_NAME, HOMEWORK_CLOSE_HOUR, TZ
 from database import crud
-from utils import OTHER_WEEK, format_date_ru, normalize_subject
+from utils import (
+    OTHER_WEEK,
+    format_date_ru,
+    normalize_subject,
+    render_schedule_text,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -121,6 +126,86 @@ async def get_changes_map(query_date: date) -> dict[int, str]:
         if lesson.isdigit():
             result[int(lesson)] = c.get("replace_to", "")
     return result
+
+
+# ---------------------------------------------------------------------------
+# Расписание дня и утренняя рассылка
+# ---------------------------------------------------------------------------
+def _pair_start(time_range: str) -> tuple[int, int] | None:
+    """Время начала пары из строки вида '8.30-10.00'."""
+    head = (time_range or "").split("-")[0].strip().replace(".", ":")
+    parts = head.split(":")
+    if len(parts) != 2 or not all(p.isdigit() for p in parts):
+        return None
+    return int(parts[0]), int(parts[1])
+
+
+async def schedule_day(target: date) -> tuple[str, list]:
+    """Текст расписания на день и список ДЗ с этим сроком (для вложений)."""
+    data = await ensure_schedule()
+    anchor = date.fromisoformat(data["anchor_date"])
+    week = schedule_parser.week_type_for(target, anchor, data["anchor_week"])
+    lessons = data.get("days", {}).get(str(target.weekday()), [])
+
+    header = f"<b>{format_date_ru(target)}</b>\nНеделя: <b>{week}</b>"
+    if not lessons:
+        return header + "\n\n—", []
+
+    day_homework = await crud.list_homework_on(target)
+    with_files = await crud.homework_ids_with_files([hw.id for hw in day_homework])
+
+    homework: dict[str, object] = {}
+    for hw in day_homework:
+        homework.setdefault(normalize_subject(hw.subject), hw)
+
+    display = {
+        key: (hw.text.strip() or ("(вложение)" if hw.id in with_files else "—"))
+        for key, hw in homework.items()
+    }
+
+    changes_map = await get_changes_map(target)
+    body = render_schedule_text(lessons, week, CALL_SCHEDULE, display, changes_map)
+    return header + "\n\n" + body, list(homework.values())
+
+
+async def morning_post(bot) -> bool:
+    """
+    Отправляет расписание дня за час до первой пары.
+    Возвращает True, если рассылка состоялась.
+    """
+    now = datetime.now(TZ)
+    today = now.date()
+
+    if await crud.get_meta("morning_post") == today.isoformat():
+        return False
+
+    data = await ensure_schedule()
+    lessons = data.get("days", {}).get(str(today.weekday()), [])
+    numbers = [lesson.get("number") for lesson in lessons if lesson.get("number")]
+    if not numbers:
+        return False
+
+    start = _pair_start(CALL_SCHEDULE.get(min(numbers), ""))
+    if start is None:
+        return False
+
+    moment = datetime(
+        today.year, today.month, today.day, start[0], start[1], tzinfo=TZ
+    ) - timedelta(hours=1)
+
+    if now < moment:
+        return False
+    if now > moment + timedelta(hours=2):
+        # бот лежал и время ушло — помечаем день, чтобы не пытаться до вечера
+        await crud.set_meta("morning_post", today.isoformat())
+        return False
+
+    text, _ = await schedule_day(today)
+    ids = await crud.users_for_notification("morning")
+    await broadcast(bot, text, user_ids=ids)
+    await broadcast_to_groups(bot, text)
+    await crud.set_meta("morning_post", today.isoformat())
+    return True
 
 
 # ---------------------------------------------------------------------------
