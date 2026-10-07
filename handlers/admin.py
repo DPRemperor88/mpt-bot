@@ -10,7 +10,7 @@ handlers/admin.py — админ-панель (личный чат):
 """
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 
 from aiogram import F, Router
 from aiogram.filters import Command
@@ -148,6 +148,16 @@ async def adm_users(msg: Message, state: FSMContext) -> None:
         await ui.show(msg.bot, msg.chat.id, msg.from_user.id, "Недостаточно прав.")
         return
     await _render_users(msg.bot, msg.chat.id, msg.from_user.id)
+
+
+@admin_router.message(F.text == "Журнал")
+async def adm_log(msg: Message, state: FSMContext) -> None:
+    await ui.delete_safe(msg.bot, msg.chat.id, msg.message_id)
+    await state.clear()
+    if await _require_role(msg.from_user.id, MODERATOR_ROLES) is None:
+        await ui.show(msg.bot, msg.chat.id, msg.from_user.id, "Недостаточно прав.")
+        return
+    await _render_log(msg.bot, msg.chat.id, msg.from_user.id)
 
 
 @admin_router.message(F.text == "Добавить модератора")
@@ -381,6 +391,7 @@ async def add_hw_done(cq: CallbackQuery, state: FSMContext) -> None:
         created_by=cq.from_user.id,
     )
     await crud.add_homework_files(hw.id, [(f[0], f[1]) for f in files])
+    await crud.add_log(cq.from_user.id, "add_hw", f"{subject}, срок {due.isoformat()}")
     await state.clear()
     await _screen(cq, f"ДЗ по «{esc(subject)}» сохранено. Срок: {format_date_ru(due)}.")
     await notify_new_homework(cq.bot, hw)
@@ -434,7 +445,10 @@ async def hw_delete(cq: CallbackQuery) -> None:
     if await _require_role(cq.from_user.id, MODERATOR_ROLES) is None:
         return
     hw_id = int(cq.data.split(":", 1)[1])
+    hw = await crud.get_homework(hw_id)
     await crud.delete_homework(hw_id)
+    if hw is not None:
+        await crud.add_log(cq.from_user.id, "del_hw", hw.subject)
     await _render_hw_list(cq.bot, cq.message.chat.id, cq.from_user.id)
 
 
@@ -457,6 +471,32 @@ async def _render_users(bot, chat_id: int, user_id: int) -> None:
     if len(users) > 40:
         lines.append(f"\nпоказаны первые 40 из {len(users)}")
 
+    await ui.update(bot, chat_id, user_id, "\n".join(lines))
+
+
+async def _render_log(bot, chat_id: int, user_id: int) -> None:
+    entries = await crud.list_log(limit=20)
+    if not entries:
+        await ui.update(bot, chat_id, user_id, "Журнал пуст.")
+        return
+
+    actions = {
+        "add_hw": "добавил ДЗ",
+        "del_hw": "удалил ДЗ",
+        "add_mod": "назначил модератора",
+        "broadcast": "сделал рассылку",
+    }
+    lines = ["<b>Журнал действий:</b>", ""]
+    for entry in entries:
+        when = ""
+        if entry.created_at:
+            when = (
+                entry.created_at.replace(tzinfo=timezone.utc)
+                .astimezone(TZ)
+                .strftime("%d.%m %H:%M")
+            )
+        what = actions.get(entry.action, entry.action)
+        lines.append(f"{when} · <code>{entry.telegram_id}</code> {what}: {esc(entry.details)}")
     await ui.update(bot, chat_id, user_id, "\n".join(lines))
 
 
@@ -497,6 +537,7 @@ async def add_mod_handler(msg: Message, state: FSMContext) -> None:
     # Регистрируем пользователя (если ещё не был), затем выдаём роль.
     await crud.get_or_create_user(user_id)
     await crud.set_user_role(user_id, "moderator")
+    await crud.add_log(msg.from_user.id, "add_mod", str(user_id))
     await state.clear()
     await ui.update(
         msg.bot,
@@ -532,6 +573,7 @@ async def broadcast_do(msg: Message, state: FSMContext) -> None:
     await ui.delete_safe(msg.bot, msg.chat.id, msg.message_id)
 
     delivered, total = await broadcast(msg.bot, text, media)
+    await crud.add_log(msg.from_user.id, "broadcast", f"доставлено {delivered} из {total}")
     await ui.update(
         msg.bot,
         msg.chat.id,

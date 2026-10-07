@@ -12,7 +12,15 @@ from datetime import date
 from sqlalchemy import delete, select
 
 from .db import SessionLocal
-from .models import ChangesCache, GroupChat, Homework, HomeworkFile, ScheduleCache, User
+from .models import (
+    ActionLog,
+    ChangesCache,
+    GroupChat,
+    Homework,
+    HomeworkFile,
+    ScheduleCache,
+    User,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -157,6 +165,12 @@ async def list_homework_files(homework_id: int) -> list[HomeworkFile]:
         return list(res.scalars().all())
 
 
+async def get_homework(homework_id: int) -> Homework | None:
+    async with SessionLocal() as s:
+        res = await s.execute(select(Homework).where(Homework.id == homework_id))
+        return res.scalar_one_or_none()
+
+
 async def homework_ids_with_files(homework_ids: list[int]) -> set[int]:
     """Возвращает id заданий, у которых есть вложения в таблице файлов."""
     if not homework_ids:
@@ -289,4 +303,21 @@ async def remove_group_chat(chat_id: int) -> None:
 async def list_group_chats() -> list[GroupChat]:
     async with SessionLocal() as s:
         res = await s.execute(select(GroupChat).order_by(GroupChat.id))
+        return list(res.scalars().all())
+
+
+# ---------------------------------------------------------------------------
+# Журнал действий
+# ---------------------------------------------------------------------------
+async def add_log(telegram_id: int | None, action: str, details: str) -> None:
+    async with SessionLocal() as s:
+        s.add(ActionLog(telegram_id=telegram_id, action=action, details=details))
+        await s.commit()
+
+
+async def list_log(limit: int = 20) -> list[ActionLog]:
+    async with SessionLocal() as s:
+        res = await s.execute(
+            select(ActionLog).order_by(ActionLog.id.desc()).limit(limit)
+        )
         return list(res.scalars().all())

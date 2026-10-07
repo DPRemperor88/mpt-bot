@@ -117,3 +117,15 @@ class HomeworkFile(Base):
     file_id: Mapped[str] = mapped_column(String(256))
     file_type: Mapped[str] = mapped_column(String(16))  # photo | document
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+
+
+class ActionLog(Base):
+    """Журнал действий модераторов и администраторов."""
+
+    __tablename__ = "action_log"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    telegram_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    action: Mapped[str] = mapped_column(String(32))
+    details: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)

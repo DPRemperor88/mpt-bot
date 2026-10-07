@@ -52,7 +52,7 @@ def admin_reply_menu(is_admin: bool = False) -> ReplyKeyboardMarkup:
     """Нижнее меню в режиме админ-панели."""
     keyboard = [
         [KeyboardButton(text="Добавить ДЗ"), KeyboardButton(text="Список ДЗ")],
-        [KeyboardButton(text="Участники")],
+        [KeyboardButton(text="Участники"), KeyboardButton(text="Журнал")],
     ]
     if is_admin:
         keyboard.append(
