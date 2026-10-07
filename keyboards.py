@@ -46,23 +46,20 @@ def group_menu() -> InlineKeyboardMarkup:
 
 
 # ---------------------------------------------------------------------------
-# Админ-панель (Inline Keyboard)
+# Админ-панель (Reply Keyboard) — режим админа и модератора
 # ---------------------------------------------------------------------------
-def admin_menu(is_admin: bool = False) -> InlineKeyboardMarkup:
-    rows = [
-        [InlineKeyboardButton(text="Добавить ДЗ", callback_data="adm:add_hw")],
-        [InlineKeyboardButton(text="Список ДЗ", callback_data="adm:list_hw")],
-        [InlineKeyboardButton(text="Участники", callback_data="adm:users")],
+def admin_reply_menu(is_admin: bool = False) -> ReplyKeyboardMarkup:
+    """Нижнее меню в режиме админ-панели."""
+    keyboard = [
+        [KeyboardButton(text="Добавить ДЗ"), KeyboardButton(text="Список ДЗ")],
+        [KeyboardButton(text="Участники")],
     ]
     if is_admin:
-        rows.append(
-            [InlineKeyboardButton(text="Добавить модератора", callback_data="adm:add_mod")]
+        keyboard.append(
+            [KeyboardButton(text="Добавить модератора"), KeyboardButton(text="Рассылка")]
         )
-        rows.append(
-            [InlineKeyboardButton(text="Рассылка", callback_data="adm:broadcast")]
-        )
-    rows.append([InlineKeyboardButton(text="Закрыть", callback_data="adm:close")])
-    return InlineKeyboardMarkup(inline_keyboard=rows)
+    keyboard.append([KeyboardButton(text="Выйти")])
+    return ReplyKeyboardMarkup(keyboard=keyboard, resize_keyboard=True)
 
 
 # ---------------------------------------------------------------------------

@@ -21,7 +21,7 @@ import ui
 from config import TZ
 from database import crud
 from keyboards import (
-    admin_menu,
+    admin_reply_menu,
     due_date_choose_keyboard,
     hw_text_keyboard,
     main_menu,
@@ -66,44 +66,121 @@ async def _screen(cq: CallbackQuery, text: str, reply_markup=None) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Вход в админ-панель
+# Вход в админ-панель: нижнее меню превращается в админ-панель
 # ---------------------------------------------------------------------------
 @admin_router.message(F.text == "Админ-панель")
-async def admin_panel(msg: Message) -> None:
+async def admin_panel(msg: Message, state: FSMContext) -> None:
     role = await _require_role(msg.from_user.id, MODERATOR_ROLES)
     await ui.delete_safe(msg.bot, msg.chat.id, msg.message_id)
+    await state.clear()
     if role is None:
         await ui.show(msg.bot, msg.chat.id, msg.from_user.id, "Недостаточно прав.")
+        return
+    await ui.clear(msg.bot, msg.chat.id, msg.from_user.id)
+    await ui.set_menu(
+        msg.bot,
+        msg.chat.id,
+        msg.from_user.id,
+        "Админ-панель:",
+        admin_reply_menu(is_admin=(role == "admin")),
+    )
+
+
+@admin_router.message(Command("admin"))
+async def admin_panel_cmd(msg: Message, state: FSMContext) -> None:
+    """Открывает панель командой — на случай, если клавиатура устарела."""
+    await admin_panel(msg, state)
+
+
+@admin_router.message(F.text == "Выйти")
+async def admin_exit(msg: Message, state: FSMContext) -> None:
+    user = await crud.get_user(msg.from_user.id)
+    privileged = bool(user and user.role in MODERATOR_ROLES)
+    await ui.delete_safe(msg.bot, msg.chat.id, msg.message_id)
+    await state.clear()
+    await ui.clear(msg.bot, msg.chat.id, msg.from_user.id)
+    await ui.set_menu(
+        msg.bot,
+        msg.chat.id,
+        msg.from_user.id,
+        "Главное меню:",
+        main_menu(privileged),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Пункты админ-панели
+# ---------------------------------------------------------------------------
+@admin_router.message(F.text == "Добавить ДЗ")
+async def adm_add_hw(msg: Message, state: FSMContext) -> None:
+    await ui.delete_safe(msg.bot, msg.chat.id, msg.message_id)
+    if await _require_role(msg.from_user.id, MODERATOR_ROLES) is None:
+        await ui.show(msg.bot, msg.chat.id, msg.from_user.id, "Недостаточно прав.")
+        return
+    await state.clear()
+    subjects = await get_subjects()
+    await state.update_data(subjects=subjects)
+    await ui.show(
+        msg.bot,
+        msg.chat.id,
+        msg.from_user.id,
+        "Выберите дисциплину:",
+        subjects_choose_keyboard(subjects),
+    )
+    await state.set_state(AddHomework.subject)
+
+
+@admin_router.message(F.text == "Список ДЗ")
+async def adm_list_hw(msg: Message, state: FSMContext) -> None:
+    await ui.delete_safe(msg.bot, msg.chat.id, msg.message_id)
+    await state.clear()
+    if await _require_role(msg.from_user.id, MODERATOR_ROLES) is None:
+        await ui.show(msg.bot, msg.chat.id, msg.from_user.id, "Недостаточно прав.")
+        return
+    await _render_hw_list(msg.bot, msg.chat.id, msg.from_user.id)
+
+
+@admin_router.message(F.text == "Участники")
+async def adm_users(msg: Message, state: FSMContext) -> None:
+    await ui.delete_safe(msg.bot, msg.chat.id, msg.message_id)
+    await state.clear()
+    if await _require_role(msg.from_user.id, MODERATOR_ROLES) is None:
+        await ui.show(msg.bot, msg.chat.id, msg.from_user.id, "Недостаточно прав.")
+        return
+    await _render_users(msg.bot, msg.chat.id, msg.from_user.id)
+
+
+@admin_router.message(F.text == "Добавить модератора")
+async def adm_add_mod(msg: Message, state: FSMContext) -> None:
+    await ui.delete_safe(msg.bot, msg.chat.id, msg.message_id)
+    await state.clear()
+    if await _require_role(msg.from_user.id, ("admin",)) is None:
+        await ui.show(msg.bot, msg.chat.id, msg.from_user.id, "Только главный администратор.")
         return
     await ui.show(
         msg.bot,
         msg.chat.id,
         msg.from_user.id,
-        "Админ-панель:",
-        reply_markup=admin_menu(is_admin=(role == "admin")),
+        "Отправьте Telegram ID нового модератора\n"
+        "или перешлите любое его сообщение.",
     )
+    await state.set_state(AddModerator.waiting)
 
 
-@admin_router.message(Command("admin"))
-async def admin_panel_cmd(msg: Message) -> None:
-    """Открывает панель командой — на случай, если клавиатура устарела."""
-    await admin_panel(msg)
-
-
-@admin_router.callback_query(F.data == "adm:menu")
-async def admin_menu_cb(cq: CallbackQuery) -> None:
-    await cq.answer()
-    role = await _require_role(cq.from_user.id, MODERATOR_ROLES)
-    if role is None:
-        await _screen(cq, "Недостаточно прав.")
+@admin_router.message(F.text == "Рассылка")
+async def adm_broadcast(msg: Message, state: FSMContext) -> None:
+    await ui.delete_safe(msg.bot, msg.chat.id, msg.message_id)
+    await state.clear()
+    if await _require_role(msg.from_user.id, ("admin",)) is None:
+        await ui.show(msg.bot, msg.chat.id, msg.from_user.id, "Только главный администратор.")
         return
-    await _screen(cq, "Админ-панель:", admin_menu(is_admin=(role == "admin")))
-
-
-@admin_router.callback_query(F.data == "adm:close")
-async def admin_close(cq: CallbackQuery) -> None:
-    await cq.answer()
-    await _screen(cq, "Панель закрыта.")
+    await ui.show(
+        msg.bot,
+        msg.chat.id,
+        msg.from_user.id,
+        "Отправьте текст или медиа для рассылки.",
+    )
+    await state.set_state(Broadcast.waiting)
 
 
 # ---------------------------------------------------------------------------
@@ -140,18 +217,6 @@ async def _due_date_options(subject: str) -> tuple[str, list[tuple[str, str]]]:
         dates.append((d.isoformat(), label))
 
     return "Выберите дату сдачи:", dates
-
-
-@admin_router.callback_query(F.data == "adm:add_hw")
-async def add_hw_start(cq: CallbackQuery, state: FSMContext) -> None:
-    await cq.answer()
-    if await _require_role(cq.from_user.id, MODERATOR_ROLES) is None:
-        await _screen(cq, "Недостаточно прав.")
-        return
-    subjects = await get_subjects()
-    await state.update_data(subjects=subjects)
-    await _screen(cq, "Выберите дисциплину:", subjects_choose_keyboard(subjects))
-    await state.set_state(AddHomework.subject)
 
 
 @admin_router.callback_query(F.data.startswith("hwsubj:"), AddHomework.subject)
@@ -324,19 +389,10 @@ async def add_hw_done(cq: CallbackQuery, state: FSMContext) -> None:
 # ---------------------------------------------------------------------------
 # Список ДЗ (завершение / удаление)
 # ---------------------------------------------------------------------------
-@admin_router.callback_query(F.data == "adm:list_hw")
-async def list_hw(cq: CallbackQuery) -> None:
-    await cq.answer()
-    if await _require_role(cq.from_user.id, MODERATOR_ROLES) is None:
-        await _screen(cq, "Недостаточно прав.")
-        return
-    await _render_hw_list(cq)
-
-
-async def _render_hw_list(cq: CallbackQuery) -> None:
+async def _render_hw_list(bot, chat_id: int, user_id: int) -> None:
     items = await crud.list_homework(limit=20)
     if not items:
-        await _screen(cq, "Заданий пока нет.")
+        await ui.update(bot, chat_id, user_id, "Заданий пока нет.")
         return
 
     pairs = annotate_homework(list(items), datetime.now(TZ))
@@ -362,9 +418,14 @@ async def _render_hw_list(cq: CallbackQuery) -> None:
                 )
             ]
         )
-    buttons.append([InlineKeyboardButton(text="Назад", callback_data="adm:menu")])
 
-    await _screen(cq, "\n".join(lines), InlineKeyboardMarkup(inline_keyboard=buttons))
+    await ui.update(
+        bot,
+        chat_id,
+        user_id,
+        "\n".join(lines),
+        InlineKeyboardMarkup(inline_keyboard=buttons),
+    )
 
 
 @admin_router.callback_query(F.data.startswith("hwdel:"))
@@ -374,25 +435,16 @@ async def hw_delete(cq: CallbackQuery) -> None:
         return
     hw_id = int(cq.data.split(":", 1)[1])
     await crud.delete_homework(hw_id)
-    await _render_hw_list(cq)
+    await _render_hw_list(cq.bot, cq.message.chat.id, cq.from_user.id)
 
 
 # ---------------------------------------------------------------------------
 # Участники
 # ---------------------------------------------------------------------------
-@admin_router.callback_query(F.data == "adm:users")
-async def list_users_cb(cq: CallbackQuery) -> None:
-    await cq.answer()
-    if await _require_role(cq.from_user.id, MODERATOR_ROLES) is None:
-        await _screen(cq, "Недостаточно прав.")
-        return
-    await _render_users(cq)
-
-
-async def _render_users(cq: CallbackQuery) -> None:
+async def _render_users(bot, chat_id: int, user_id: int) -> None:
     users = await crud.list_users()
     if not users:
-        await _screen(cq, "Пользователей пока нет.")
+        await ui.update(bot, chat_id, user_id, "Пользователей пока нет.")
         return
 
     roles = {"admin": "админ", "moderator": "модератор", "student": "студент"}
@@ -405,27 +457,12 @@ async def _render_users(cq: CallbackQuery) -> None:
     if len(users) > 40:
         lines.append(f"\nпоказаны первые 40 из {len(users)}")
 
-    buttons = [[InlineKeyboardButton(text="Назад", callback_data="adm:menu")]]
-    await _screen(cq, "\n".join(lines), InlineKeyboardMarkup(inline_keyboard=buttons))
+    await ui.update(bot, chat_id, user_id, "\n".join(lines))
 
 
 # ---------------------------------------------------------------------------
 # Добавление модератора (только admin)
 # ---------------------------------------------------------------------------
-@admin_router.callback_query(F.data == "adm:add_mod")
-async def add_mod_start(cq: CallbackQuery, state: FSMContext) -> None:
-    await cq.answer()
-    if await _require_role(cq.from_user.id, ("admin",)) is None:
-        await _screen(cq, "Только главный администратор.")
-        return
-    await _screen(
-        cq,
-        "Отправьте Telegram ID нового модератора\n"
-        "или перешлите любое его сообщение.",
-    )
-    await state.set_state(AddModerator.waiting)
-
-
 @admin_router.message(AddModerator.waiting)
 async def add_mod_handler(msg: Message, state: FSMContext) -> None:
     user_id: int | None = None
@@ -482,16 +519,6 @@ async def add_mod_handler(msg: Message, state: FSMContext) -> None:
 # ---------------------------------------------------------------------------
 # Рассылка (только admin)
 # ---------------------------------------------------------------------------
-@admin_router.callback_query(F.data == "adm:broadcast")
-async def broadcast_start(cq: CallbackQuery, state: FSMContext) -> None:
-    await cq.answer()
-    if await _require_role(cq.from_user.id, ("admin",)) is None:
-        await _screen(cq, "Только главный администратор.")
-        return
-    await _screen(cq, "Отправьте текст или медиа для рассылки.")
-    await state.set_state(Broadcast.waiting)
-
-
 @admin_router.message(Broadcast.waiting)
 async def broadcast_do(msg: Message, state: FSMContext) -> None:
     media: tuple[str, str] | None = None
