@@ -344,14 +344,14 @@ async def _render_hw_list(cq: CallbackQuery) -> None:
     lines = ["<b>Домашние задания:</b>"]
     buttons = []
     for hw, passed in pairs:
+        # обычное задание помечать нечем, а закрытые и просроченные — помечаем
+        mark = ""
         if not hw.is_active:
-            status = "[завершено]"
+            mark = "[завершено] "
         elif passed:
-            status = "[истекло]"
-        else:
-            status = "[активно]"
+            mark = "[истекло] "
         lines.append(
-            f"\n{status} <b>{esc(hw.subject)}</b> — {esc(hw.text[:90])} "
+            f"\n{mark}<b>{esc(hw.subject)}</b> — {esc(hw.text[:90])} "
             f"(до {format_date_ru(hw.due_date)})"
         )
         buttons.append(
