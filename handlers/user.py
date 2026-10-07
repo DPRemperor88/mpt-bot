@@ -18,7 +18,7 @@ import parser as schedule_parser
 import ui
 from config import ADMIN_IDS, CALL_SCHEDULE, GROUP_NAME, TZ
 from database import crud
-from keyboards import main_menu
+from keyboards import main_menu, notifications_keyboard
 from services import (
     annotate_homework,
     ensure_schedule,
@@ -37,6 +37,7 @@ user_router = Router()
 
 # Личный чат (в группах работает отдельный group_router).
 user_router.message.filter(F.chat.type == "private")
+user_router.callback_query.filter(F.message.chat.type == "private")
 
 
 # ---------------------------------------------------------------------------
@@ -185,6 +186,42 @@ async def homework_all(msg: Message) -> None:
     for hw in items:
         ids.extend(await send_homework_media(msg.bot, chat_id, hw))
     ui.track(user_id, ids)
+
+
+@user_router.message(F.text == "Уведомления")
+async def notifications(msg: Message) -> None:
+    user_id = msg.from_user.id
+    chat_id = msg.chat.id
+    await ui.delete_safe(msg.bot, chat_id, msg.message_id)
+
+    settings = await crud.notification_settings(user_id)
+    await ui.show(
+        msg.bot,
+        chat_id,
+        user_id,
+        "<b>Уведомления:</b>",
+        notifications_keyboard(settings),
+    )
+
+
+@user_router.callback_query(F.data.startswith("ntf:"))
+async def notification_toggle(cq: CallbackQuery) -> None:
+    await cq.answer()
+    kind = cq.data.split(":", 1)[1]
+    if kind not in crud.NOTIFICATION_KINDS:
+        return
+
+    await crud.toggle_notification(cq.from_user.id, kind)
+    settings = await crud.notification_settings(cq.from_user.id)
+
+    ui.track(cq.from_user.id, [cq.message.message_id])
+    await ui.update(
+        cq.bot,
+        cq.message.chat.id,
+        cq.from_user.id,
+        "<b>Уведомления:</b>",
+        notifications_keyboard(settings),
+    )
 
 
 @user_router.message(F.text == "Домашнее задание")

@@ -18,6 +18,7 @@ from .models import (
     GroupChat,
     Homework,
     HomeworkFile,
+    NotificationSetting,
     ScheduleCache,
     User,
 )
@@ -321,3 +322,53 @@ async def list_log(limit: int = 20) -> list[ActionLog]:
             select(ActionLog).order_by(ActionLog.id.desc()).limit(limit)
         )
         return list(res.scalars().all())
+
+
+# ---------------------------------------------------------------------------
+# Настройки уведомлений
+# ---------------------------------------------------------------------------
+NOTIFICATION_KINDS = ("homework", "changes", "morning")
+
+
+async def notification_settings(telegram_id: int) -> dict[str, bool]:
+    """Текущие настройки: тип -> включено. По умолчанию всё включено."""
+    async with SessionLocal() as s:
+        res = await s.execute(
+            select(NotificationSetting).where(
+                NotificationSetting.telegram_id == telegram_id
+            )
+        )
+        rows = {r.kind: r.enabled for r in res.scalars().all()}
+    return {kind: rows.get(kind, True) for kind in NOTIFICATION_KINDS}
+
+
+async def toggle_notification(telegram_id: int, kind: str) -> bool:
+    """Переключает тип уведомления, возвращает новое состояние."""
+    async with SessionLocal() as s:
+        res = await s.execute(
+            select(NotificationSetting).where(
+                NotificationSetting.telegram_id == telegram_id,
+                NotificationSetting.kind == kind,
+            )
+        )
+        row = res.scalar_one_or_none()
+        if row is None:
+            row = NotificationSetting(
+                telegram_id=telegram_id, kind=kind, enabled=False
+            )
+            s.add(row)
+        else:
+            row.enabled = not row.enabled
+        await s.commit()
+        return row.enabled
+
+
+async def users_for_notification(kind: str) -> list[int]:
+    """id пользователей, у которых этот тип уведомлений включён."""
+    async with SessionLocal() as s:
+        users = (await s.execute(select(User.telegram_id))).scalars().all()
+        res = await s.execute(
+            select(NotificationSetting).where(NotificationSetting.kind == kind)
+        )
+        disabled = {r.telegram_id for r in res.scalars().all() if not r.enabled}
+    return [uid for uid in users if uid not in disabled]

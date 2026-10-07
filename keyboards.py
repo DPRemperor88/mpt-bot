@@ -25,7 +25,7 @@ def main_menu(is_privileged: bool = False) -> ReplyKeyboardMarkup:
             KeyboardButton(text="ДЗ на сегодня"),
             KeyboardButton(text="ДЗ на завтра"),
         ],
-        [KeyboardButton(text="Все ДЗ")],
+        [KeyboardButton(text="Все ДЗ"), KeyboardButton(text="Уведомления")],
     ]
     if is_privileged:
         keyboard.append([KeyboardButton(text="Админ-панель")])
@@ -43,6 +43,27 @@ def group_menu() -> InlineKeyboardMarkup:
             [InlineKeyboardButton(text="ДЗ на завтра", callback_data="grp:tomorrow")],
         ]
     )
+
+
+# ---------------------------------------------------------------------------
+# Уведомления (Inline Keyboard)
+# ---------------------------------------------------------------------------
+NOTIFICATION_TITLES = {
+    "homework": "Новое ДЗ",
+    "changes": "Замены",
+    "morning": "Расписание утром",
+}
+
+
+def notifications_keyboard(settings: dict[str, bool]) -> InlineKeyboardMarkup:
+    """Кнопки-переключатели: нажатие меняет состояние."""
+    buttons = []
+    for kind, title in NOTIFICATION_TITLES.items():
+        mark = "вкл" if settings.get(kind, True) else "выкл"
+        buttons.append(
+            [InlineKeyboardButton(text=f"{title}: {mark}", callback_data=f"ntf:{kind}")]
+        )
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
 # ---------------------------------------------------------------------------

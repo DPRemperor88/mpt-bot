@@ -174,36 +174,45 @@ async def notify_changes(bot, items: list, change_date_str: str) -> None:
         for c in items
     ]
     message = header + "\n".join(lines)
-    await broadcast(bot, message)             # личка подписчикам
-    await broadcast_to_groups(bot, message)   # и в группы, где есть бот
+    ids = await crud.users_for_notification("changes")
+    await broadcast(bot, message, user_ids=ids)   # личка тем, кто подписан
+    await broadcast_to_groups(bot, message)       # и в группы, где есть бот
 
 
 # ---------------------------------------------------------------------------
 # Рассылка
 # ---------------------------------------------------------------------------
-async def broadcast(bot, text: str, media: tuple[str, str] | None = None) -> tuple[int, int]:
+async def broadcast(
+    bot,
+    text: str,
+    media: tuple[str, str] | None = None,
+    user_ids: list[int] | None = None,
+) -> tuple[int, int]:
     """
-    Шлёт сообщение (или медиа с подписью) всем зарегистрированным пользователям.
-    Возвращает (доставлено, всего). Ошибки отдельных пользователей игнорируются.
+    Шлёт сообщение (или медиа с подписью) пользователям.
+    user_ids=None — всем зарегистрированным. Возвращает (доставлено, всего).
     """
-    users = await crud.list_users()
+    ids = user_ids
+    if ids is None:
+        ids = [u.telegram_id for u in await crud.list_users()]
+
     delivered = 0
-    for u in users:
+    for uid in ids:
         try:
             if media:
                 file_id, media_type = media
                 if media_type == "photo":
-                    await bot.send_photo(u.telegram_id, file_id, caption=text or None)
+                    await bot.send_photo(uid, file_id, caption=text or None)
                 else:
-                    await bot.send_document(u.telegram_id, file_id, caption=text or None)
+                    await bot.send_document(uid, file_id, caption=text or None)
             else:
-                await bot.send_message(u.telegram_id, text)
+                await bot.send_message(uid, text)
             delivered += 1
         except Exception:
             # пользователь заблокировал бота или ушёл из чата — пропускаем
             pass
         await asyncio.sleep(0.05)  # не упереться в лимиты Telegram
-    return delivered, len(users)
+    return delivered, len(ids)
 
 
 async def broadcast_to_groups(bot, text: str) -> int:
@@ -231,13 +240,13 @@ async def notify_new_homework(bot, hw) -> None:
     )
     files = await _homework_files(hw)
 
-    for user in await crud.list_users():
+    for uid in await crud.users_for_notification("homework"):
         try:
-            await bot.send_message(user.telegram_id, text)
+            await bot.send_message(uid, text)
         except Exception:
             # пользователь заблокировал бота — пропускаем
             continue
-        await send_homework_media(bot, user.telegram_id, hw, files)
+        await send_homework_media(bot, uid, hw, files)
         await asyncio.sleep(0.05)
 
 

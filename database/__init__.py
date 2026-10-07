@@ -8,6 +8,7 @@ from .models import (
     ChangesCache,
     GroupChat,
     ActionLog,
+    NotificationSetting,
 )
 from .db import engine, SessionLocal, init_db
 
@@ -20,6 +21,7 @@ __all__ = [
     "ChangesCache",
     "GroupChat",
     "ActionLog",
+    "NotificationSetting",
     "engine",
     "SessionLocal",
     "init_db",

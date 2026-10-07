@@ -129,3 +129,17 @@ class ActionLog(Base):
     action: Mapped[str] = mapped_column(String(32))
     details: Mapped[str] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+
+
+class NotificationSetting(Base):
+    """Настройка уведомлений. Нет строки — уведомление включено."""
+
+    __tablename__ = "notification_settings"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    telegram_id: Mapped[int] = mapped_column(BigInteger, index=True)
+    kind: Mapped[str] = mapped_column(String(32))
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    __table_args__ = (
+        UniqueConstraint("telegram_id", "kind", name="uq_notify_user_kind"),
+    )
