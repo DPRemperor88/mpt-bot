@@ -111,7 +111,7 @@ async def admin_close(cq: CallbackQuery) -> None:
 # ---------------------------------------------------------------------------
 async def _due_date_options(subject: str) -> tuple[str, list[tuple[str, str]]]:
     """
-    Текст шага 2 и даты сдачи: только дни, когда у дисциплины есть пара.
+    Даты сдачи: только дни, когда у дисциплины есть пара.
     Если расписание недоступно или предмет не найден — ближайшие 7 дней.
     """
     today = datetime.now(TZ).date()
@@ -123,10 +123,8 @@ async def _due_date_options(subject: str) -> tuple[str, list[tuple[str, str]]]:
         lesson_days = []
 
     if lesson_days:
-        prompt = "Шаг 2/3. Выберите дату сдачи (показаны дни, когда есть пара):"
         days: list[tuple[date, int | None]] = list(lesson_days)
     else:
-        prompt = "Шаг 2/3. Выберите дату сдачи ДЗ:"
         days = [(today + timedelta(days=i), None) for i in range(7)]
 
     dates: list[tuple[str, str]] = []
@@ -141,7 +139,7 @@ async def _due_date_options(subject: str) -> tuple[str, list[tuple[str, str]]]:
             label += f" · {number}-я пара"
         dates.append((d.isoformat(), label))
 
-    return prompt, dates
+    return "Выберите дату сдачи:", dates
 
 
 @admin_router.callback_query(F.data == "adm:add_hw")
@@ -152,7 +150,7 @@ async def add_hw_start(cq: CallbackQuery, state: FSMContext) -> None:
         return
     subjects = await get_subjects()
     await state.update_data(subjects=subjects)
-    await _screen(cq, "Шаг 1/3. Выберите дисциплину:", subjects_choose_keyboard(subjects))
+    await _screen(cq, "Выберите дисциплину:", subjects_choose_keyboard(subjects))
     await state.set_state(AddHomework.subject)
 
 
@@ -165,7 +163,7 @@ async def add_hw_subject_cb(cq: CallbackQuery, state: FSMContext) -> None:
         await _screen(cq, "Отменено.")
         return
     if payload == "manual":
-        await _screen(cq, "Введите название дисциплины текстом:")
+        await _screen(cq, "Введите название дисциплины:")
         return
 
     data = await state.get_data()
@@ -173,7 +171,7 @@ async def add_hw_subject_cb(cq: CallbackQuery, state: FSMContext) -> None:
     try:
         subject = subjects[int(payload)]
     except (ValueError, IndexError):
-        await _screen(cq, "Ошибка выбора, попробуйте ещё раз.")
+        await _screen(cq, "Ошибка выбора.")
         return
 
     text, dates = await _due_date_options(subject)
@@ -192,7 +190,7 @@ async def add_hw_subject_manual(msg: Message, state: FSMContext) -> None:
             msg.bot,
             msg.chat.id,
             msg.from_user.id,
-            "Введите название дисциплины или нажмите кнопку.",
+            "Введите название дисциплины.",
         )
         return
 
@@ -222,7 +220,7 @@ async def add_hw_due_cb(cq: CallbackQuery, state: FSMContext) -> None:
     try:
         due = due_dates[int(payload)]
     except (ValueError, IndexError):
-        await _screen(cq, "Ошибка, попробуйте ещё раз.")
+        await _screen(cq, "Ошибка.")
         return
 
     await state.update_data(due_date=due, hw_text="", files=[])
@@ -241,8 +239,7 @@ async def _refresh_buffer(bot, chat_id: int, user_id: int, state: FSMContext) ->
     files = data.get("files", [])
 
     body = (
-        "Шаг 3/3. Отправьте текст задания и файлы (можно несколько).\n"
-        "Когда закончите, нажмите «Готово».\n\n"
+        "Отправьте текст и файлы, затем «Готово».\n\n"
         f"<b>Дисциплина:</b> {esc(subject)}\n"
         f"<b>Срок:</b> {due_text}\n"
         f"<b>Текст:</b> {esc(text) if text else '—'}\n"
@@ -305,10 +302,10 @@ async def add_hw_done(cq: CallbackQuery, state: FSMContext) -> None:
 
     if not subject or not due_str:
         await state.clear()
-        await _screen(cq, "Данные потерялись — начните добавление заново.")
+        await _screen(cq, "Данные потерялись, начните заново.")
         return
     if not text and not files:
-        await _screen(cq, "Добавьте текст задания или хотя бы один файл.", hw_text_keyboard())
+        await _screen(cq, "Добавьте текст или файл.", hw_text_keyboard())
         return
 
     due = date.fromisoformat(due_str)
@@ -320,7 +317,7 @@ async def add_hw_done(cq: CallbackQuery, state: FSMContext) -> None:
     )
     await crud.add_homework_files(hw.id, [(f[0], f[1]) for f in files])
     await state.clear()
-    await _screen(cq, f"ДЗ по «{esc(subject)}» сохранено (сдать до {format_date_ru(due)}).")
+    await _screen(cq, f"ДЗ по «{esc(subject)}» сохранено. Срок: {format_date_ru(due)}.")
     await notify_new_homework(cq.bot, hw)
 
 
@@ -339,12 +336,12 @@ async def list_hw(cq: CallbackQuery) -> None:
 async def _render_hw_list(cq: CallbackQuery) -> None:
     items = await crud.list_homework(limit=20)
     if not items:
-        await _screen(cq, "Домашних заданий пока нет.")
+        await _screen(cq, "Заданий пока нет.")
         return
 
     pairs = annotate_homework(list(items), datetime.now(TZ))
 
-    lines = ["<b>Домашние задания (последние 20):</b>"]
+    lines = ["<b>Домашние задания:</b>"]
     buttons = []
     for hw, passed in pairs:
         if not hw.is_active:
@@ -432,7 +429,7 @@ async def add_mod_start(cq: CallbackQuery, state: FSMContext) -> None:
         return
     await _screen(
         cq,
-        "Отправьте Telegram ID нового модератора (числом)\n"
+        "Отправьте Telegram ID нового модератора\n"
         "или перешлите любое его сообщение.",
     )
     await state.set_state(AddModerator.waiting)
@@ -450,8 +447,7 @@ async def add_mod_handler(msg: Message, state: FSMContext) -> None:
             msg.bot,
             msg.chat.id,
             msg.from_user.id,
-            "Это сообщение от пользователя со скрытым профилем. "
-            "Отправьте его Telegram ID числом.",
+            "Профиль скрыт, отправьте ID числом.",
         )
         return
     else:
@@ -466,7 +462,7 @@ async def add_mod_handler(msg: Message, state: FSMContext) -> None:
             msg.bot,
             msg.chat.id,
             msg.from_user.id,
-            "Не удалось определить ID. Отправьте числовой ID или перешлите сообщение.",
+            "Не удалось определить ID.",
         )
         return
 
@@ -484,8 +480,7 @@ async def add_mod_handler(msg: Message, state: FSMContext) -> None:
     try:
         await msg.bot.send_message(
             user_id,
-            "Вам выданы права модератора.\n"
-            "Откройте «Админ-панель» в меню: там «Список ДЗ» — завершение и удаление заданий.",
+            "Вам выданы права модератора.",
             reply_markup=main_menu(True),
         )
     except Exception:
@@ -502,7 +497,7 @@ async def broadcast_start(cq: CallbackQuery, state: FSMContext) -> None:
     if await _require_role(cq.from_user.id, ("admin",)) is None:
         await _screen(cq, "Только главный администратор.")
         return
-    await _screen(cq, "Отправьте текст или медиа (фото/файл) для рассылки всем пользователям.")
+    await _screen(cq, "Отправьте текст или медиа для рассылки.")
     await state.set_state(Broadcast.waiting)
 
 

@@ -64,17 +64,16 @@ async def _greet(msg: Message, greeting: bool) -> None:
 
     if greeting:
         if user.role == "admin":
-            extra = "Вы являетесь главным администратором."
+            extra = "Роль: главный администратор."
         elif user.role == "moderator":
-            extra = "Вы являетесь модератором."
+            extra = "Роль: модератор."
         else:
-            extra = "Отправьте свой ID администратору, чтобы получить права модератора."
+            extra = "Отправьте свой ID администратору, чтобы стать модератором."
         text = (
             f"Привет, {tg.first_name}!\n"
             f"Это бот расписания и домашних заданий группы <b>{GROUP_NAME}</b>.\n\n"
             f"Ваш Telegram ID: <code>{tg.id}</code>\n"
-            f"{extra}\n\n"
-            f"Выберите действие в меню ниже."
+            f"{extra}"
         )
     else:
         text = "Главное меню:"
@@ -185,7 +184,7 @@ async def _send_homework(msg: Message, offset: int) -> None:
 
     await ui.clear(msg.bot, chat_id, user_id)
     if not items:
-        await ui.show(msg.bot, chat_id, user_id, f"Домашних заданий на {label} нет.")
+        await ui.show(msg.bot, chat_id, user_id, "Заданий нет.")
         return
 
     sent = await msg.bot.send_message(
