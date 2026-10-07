@@ -17,6 +17,7 @@ from sqlalchemy import (
     Date,
     DateTime,
     Integer,
+    Index,
     String,
     Text,
     UniqueConstraint,
@@ -81,7 +82,7 @@ class ScheduleCache(Base):
     days_json: Mapped[str] = mapped_column(Text)
     anchor_date: Mapped[date] = mapped_column(Date)
     anchor_week: Mapped[str] = mapped_column(String(16))
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
 
 
 class ChangesCache(Base):
@@ -93,7 +94,7 @@ class ChangesCache(Base):
     group_name: Mapped[str] = mapped_column(String(64), unique=True)
     change_date: Mapped[date | None] = mapped_column(Date, nullable=True)
     snapshot_json: Mapped[str] = mapped_column(Text)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
 
 
 class GroupChat(Base):
@@ -152,4 +153,25 @@ class Meta(Base):
 
     key: Mapped[str] = mapped_column(String(64), primary_key=True)
     value: Mapped[str] = mapped_column(Text)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, onupdate=_utcnow)
+
+
+class Delivery(Base):
+    """Одна доставка получателю; cursor позволяет продолжать после сбоя."""
+
+    __tablename__ = "deliveries"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    event_key: Mapped[str] = mapped_column(String(128))
+    chat_id: Mapped[int] = mapped_column(BigInteger)
+    payload_json: Mapped[str] = mapped_column(Text)
+    cursor: Mapped[int] = mapped_column(Integer, default=0)
+    status: Mapped[str] = mapped_column(String(16), default="pending", index=True)
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    next_attempt_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow, index=True)
+    last_error: Mapped[str | None] = mapped_column(String(256), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=_utcnow)
+    __table_args__ = (
+        UniqueConstraint("event_key", "chat_id", name="uq_delivery_event_chat"),
+        Index("ix_delivery_chat_pending", "chat_id", "status", "id"),
+    )

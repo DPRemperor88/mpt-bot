@@ -12,14 +12,16 @@ from datetime import datetime, timedelta
 
 from aiogram import F, Router
 from aiogram.filters import Command, CommandStart
+from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 
 import ui
+from delivery import send_text
 from config import ADMIN_IDS, GROUP_NAME, TZ
 from database import crud
 from keyboards import main_menu, notifications_keyboard
 from services import annotate_homework, schedule_day, send_homework_media
-from utils import render_homework_all, render_homework_day
+from utils import esc, render_homework_all, render_homework_day
 
 user_router = Router()
 
@@ -32,12 +34,20 @@ user_router.callback_query.filter(F.message.chat.type == "private")
 # Старт / меню
 # ---------------------------------------------------------------------------
 @user_router.message(CommandStart())
-async def cmd_start(msg: Message) -> None:
+async def cmd_start(msg: Message, state: FSMContext) -> None:
+    await state.clear()
     await _greet(msg, greeting=True)
 
 
 @user_router.message(Command("menu"))
-async def cmd_menu(msg: Message) -> None:
+async def cmd_menu(msg: Message, state: FSMContext) -> None:
+    await state.clear()
+    await _greet(msg, greeting=False)
+
+
+@user_router.message(Command("cancel"))
+async def cmd_cancel(msg: Message, state: FSMContext) -> None:
+    await state.clear()
     await _greet(msg, greeting=False)
 
 
@@ -60,8 +70,8 @@ async def _greet(msg: Message, greeting: bool) -> None:
         else:
             extra = "Отправьте свой ID администратору, чтобы стать модератором."
         text = (
-            f"Привет, {tg.first_name}!\n"
-            f"Это бот расписания и домашних заданий группы <b>{GROUP_NAME}</b>.\n\n"
+            f"Привет, {esc(tg.first_name)}!\n"
+            f"Это бот расписания и домашних заданий группы <b>{esc(GROUP_NAME)}</b>.\n\n"
             f"Ваш Telegram ID: <code>{tg.id}</code>\n"
             f"{extra}"
         )
@@ -95,8 +105,7 @@ async def _send_schedule(msg: Message, offset: int) -> None:
     text, day_homework = await schedule_day(target)
 
     await ui.clear(msg.bot, chat_id, user_id)
-    sent = await msg.bot.send_message(chat_id, text)
-    ids = [sent.message_id]
+    ids = await send_text(msg.bot, chat_id, text)
     for hw in day_homework:
         ids.extend(await send_homework_media(msg.bot, chat_id, hw))
     ui.track(user_id, ids)
@@ -132,8 +141,7 @@ async def homework_all(msg: Message) -> None:
         await ui.show(msg.bot, chat_id, user_id, "Заданий нет.")
         return
 
-    sent = await msg.bot.send_message(chat_id, render_homework_all(items, with_files))
-    ids = [sent.message_id]
+    ids = await send_text(msg.bot, chat_id, render_homework_all(items, with_files))
     for hw in items:
         ids.extend(await send_homework_media(msg.bot, chat_id, hw))
     ui.track(user_id, ids)
@@ -200,11 +208,11 @@ async def _send_homework(msg: Message, offset: int) -> None:
         await ui.show(msg.bot, chat_id, user_id, "Заданий нет.")
         return
 
-    sent = await msg.bot.send_message(
+    ids = await send_text(
+        msg.bot,
         chat_id,
         render_homework_day(items, target, label, with_files),
     )
-    ids = [sent.message_id]
     for hw in items:
         ids.extend(await send_homework_media(msg.bot, chat_id, hw))
     ui.track(user_id, ids)

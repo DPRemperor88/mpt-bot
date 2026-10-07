@@ -11,8 +11,11 @@ handlers/group.py — работа бота в групповом чате:
 from __future__ import annotations
 
 from datetime import datetime, timedelta
+import asyncio
+from weakref import WeakValueDictionary
 
-from aiogram import F, Router
+from aiogram import BaseMiddleware, F, Router
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.enums import ChatMemberStatus
 from aiogram.filters import Command, CommandStart
 from aiogram.types import CallbackQuery, ChatMemberUpdated, Message
@@ -21,16 +24,33 @@ from config import GROUP_NAME, TZ
 from database import crud
 from keyboards import group_menu
 from services import annotate_homework, send_homework_media
-from utils import render_homework_day
+from utils import esc, render_homework_day
+from delivery import split_html
 
 group_router = Router()
+
+
+class GroupViewMiddleware(BaseMiddleware):
+    def __init__(self):
+        self.locks = WeakValueDictionary()
+
+    async def __call__(self, handler, event, data):
+        message = event.message if isinstance(event, CallbackQuery) else event
+        lock = self.locks.setdefault(message.chat.id, asyncio.Lock())
+        async with lock:
+            return await handler(event, data)
+
+
+group_view_lock = GroupViewMiddleware()
+group_router.message.middleware(group_view_lock)
+group_router.callback_query.middleware(group_view_lock)
 
 # Обрабатываем только групповые чаты.
 group_router.message.filter(F.chat.type.in_({"group", "supergroup"}))
 group_router.callback_query.filter(F.message.chat.type.in_({"group", "supergroup"}))
 
 WELCOME = (
-    f"Бот группы <b>{GROUP_NAME}</b>.\n"
+    f"Бот группы <b>{esc(GROUP_NAME)}</b>.\n"
     "Расписание — в личном чате с ботом."
 )
 
@@ -89,13 +109,21 @@ async def _show_homework(
 
     text = render_homework_day(items, target, label, with_files)
 
+    chunks = split_html(text)
     if menu_message is not None:
-        await menu_message.edit_text(text, reply_markup=group_menu())
+        try:
+            await menu_message.edit_text(chunks[0], reply_markup=group_menu())
+        except TelegramBadRequest as exc:
+            if "message is not modified" not in str(exc):
+                raise
     else:
-        await bot.send_message(chat_id, text, reply_markup=group_menu())
+        await bot.send_message(chat_id, chunks[0], reply_markup=group_menu())
 
     await _clear_media(bot, chat_id)
     ids: list[int] = []
+    for chunk in chunks[1:]:
+        sent = await bot.send_message(chat_id, chunk)
+        ids.append(sent.message_id)
     for hw in items:
         ids.extend(await send_homework_media(bot, chat_id, hw))
     _media[chat_id] = ids

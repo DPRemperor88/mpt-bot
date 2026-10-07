@@ -16,6 +16,7 @@ from typing import Any, Iterable
 from aiogram import Bot
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import InlineKeyboardMarkup, Message
+from delivery import send_text, split_html
 
 # user_id -> id сообщений текущего экрана (содержимое раздела)
 _views: dict[int, list[int]] = {}
@@ -71,12 +72,10 @@ async def show(
     user_id: int,
     text: str,
     reply_markup: Any = None,
-) -> Message:
-    """Удалить предыдущий экран и отправить новый (одно сообщение)."""
+) -> None:
+    """Удалить предыдущий экран и отправить новый, разбивая длинный текст."""
     await clear(bot, chat_id, user_id)
-    sent = await bot.send_message(chat_id, text, reply_markup=reply_markup)
-    track(user_id, [sent.message_id])
-    return sent
+    track(user_id, await send_text(bot, chat_id, text, reply_markup))
 
 
 async def update(
@@ -88,7 +87,7 @@ async def update(
 ) -> None:
     """Обновить экран редактированием. Экран из нескольких сообщений пересоздаётся."""
     ids = _views.get(user_id, [])
-    if len(ids) != 1:
+    if len(ids) != 1 or len(split_html(text)) > 1:
         await show(bot, chat_id, user_id, text, reply_markup)
         return
     try:

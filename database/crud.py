@@ -9,7 +9,8 @@ from __future__ import annotations
 import json
 from datetime import date
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, update, func
+from sqlalchemy.orm import aliased
 
 from .db import SessionLocal
 from .models import (
@@ -22,6 +23,8 @@ from .models import (
     Meta,
     ScheduleCache,
     User,
+    Delivery,
+    _utcnow,
 )
 
 
@@ -85,6 +88,8 @@ async def add_homework(
     media_file_id: str | None = None,
     media_type: str | None = None,
     created_by: int | None = None,
+    files: list[tuple[str, str]] = (),
+    deliveries: list[dict] = (),
 ) -> Homework:
     async with SessionLocal() as s:
         hw = Homework(
@@ -96,6 +101,10 @@ async def add_homework(
             created_by=created_by,
         )
         s.add(hw)
+        await s.flush()
+        s.add_all([HomeworkFile(homework_id=hw.id, file_id=fid, file_type=kind) for fid, kind in files])
+        s.add(ActionLog(telegram_id=created_by, action="add_hw", details=f"{subject}, срок {due_date.isoformat()}"))
+        s.add_all([Delivery(**item) for item in deliveries])
         await s.commit()
         return hw
 
@@ -111,7 +120,7 @@ async def list_homework_on(due_date: date) -> list[Homework]:
         return list(res.scalars().all())
 
 
-async def list_upcoming_homework(on_date: date, limit: int = 30) -> list[Homework]:
+async def list_upcoming_homework(on_date: date, limit: int | None = None) -> list[Homework]:
     """Активные ДЗ со сроком не раньше указанной даты, по возрастанию срока."""
     async with SessionLocal() as s:
         res = await s.execute(
@@ -123,11 +132,11 @@ async def list_upcoming_homework(on_date: date, limit: int = 30) -> list[Homewor
         return list(res.scalars().all())
 
 
-async def list_homework(limit: int = 30) -> list[Homework]:
+async def list_homework(limit: int = 30, offset: int = 0) -> list[Homework]:
     """Все ДЗ (для админ-панели), последние сверху."""
     async with SessionLocal() as s:
         res = await s.execute(
-            select(Homework).order_by(Homework.created_at.desc()).limit(limit)
+            select(Homework).order_by(Homework.id.desc()).offset(offset).limit(limit)
         )
         return list(res.scalars().all())
 
@@ -221,6 +230,7 @@ async def save_schedule(
             row.days_json = days_json
             row.anchor_date = date.fromisoformat(anchor_date)
             row.anchor_week = anchor_week
+        row.updated_at = _utcnow()
         await s.commit()
 
 
@@ -236,6 +246,7 @@ async def get_schedule(group_name: str) -> dict | None:
         "days": json.loads(row.days_json),
         "anchor_date": row.anchor_date.isoformat(),
         "anchor_week": row.anchor_week,
+        "updated_at": row.updated_at,
     }
 
 
@@ -246,6 +257,7 @@ async def save_changes(
     group_name: str,
     change_date: str | None,
     snapshot_json: str,
+    deliveries: list[dict] = (),
 ) -> None:
     async with SessionLocal() as s:
         res = await s.execute(
@@ -263,6 +275,8 @@ async def save_changes(
         else:
             row.change_date = parsed_date
             row.snapshot_json = snapshot_json
+        row.updated_at = _utcnow()
+        s.add_all([Delivery(**item) for item in deliveries])
         await s.commit()
 
 
@@ -277,6 +291,7 @@ async def get_changes(group_name: str) -> dict | None:
     return {
         "date": row.change_date.isoformat() if row.change_date else None,
         "changes": json.loads(row.snapshot_json),
+        "updated_at": row.updated_at,
     }
 
 
@@ -317,10 +332,10 @@ async def add_log(telegram_id: int | None, action: str, details: str) -> None:
         await s.commit()
 
 
-async def list_log(limit: int = 20) -> list[ActionLog]:
+async def list_log(limit: int = 20, offset: int = 0) -> list[ActionLog]:
     async with SessionLocal() as s:
         res = await s.execute(
-            select(ActionLog).order_by(ActionLog.id.desc()).limit(limit)
+            select(ActionLog).order_by(ActionLog.id.desc()).offset(offset).limit(limit)
         )
         return list(res.scalars().all())
 
@@ -392,3 +407,44 @@ async def set_meta(key: str, value: str) -> None:
         else:
             row.value = value
         await s.commit()
+
+
+async def enqueue(deliveries: list[dict], meta: tuple[str, str] | None = None) -> None:
+    """Очередь и маркер события фиксируются атомарно."""
+    async with SessionLocal() as s:
+        s.add_all([Delivery(**item) for item in deliveries])
+        if meta:
+            row = await s.get(Meta, meta[0])
+            if row is None:
+                s.add(Meta(key=meta[0], value=meta[1]))
+            else:
+                row.value = meta[1]
+        await s.commit()
+
+
+async def pending_deliveries(limit: int = 50) -> list[Delivery]:
+    async with SessionLocal() as s:
+        earlier = aliased(Delivery)
+        blocked = select(earlier.id).where(
+            earlier.chat_id == Delivery.chat_id,
+            earlier.status == "pending",
+            earlier.id < Delivery.id,
+        ).exists()
+        result = await s.execute(select(Delivery).where(
+            Delivery.status == "pending", Delivery.next_attempt_at <= _utcnow(), ~blocked
+        ).order_by(Delivery.id).limit(limit))
+        return list(result.scalars())
+
+
+async def update_delivery(delivery_id: int, **values) -> None:
+    async with SessionLocal() as s:
+        await s.execute(update(Delivery).where(Delivery.id == delivery_id).values(**values))
+        await s.commit()
+
+
+async def delivery_counts(event_key: str) -> tuple[int, int]:
+    async with SessionLocal() as s:
+        rows = (await s.execute(select(Delivery.status, func.count()).where(
+            Delivery.event_key == event_key).group_by(Delivery.status))).all()
+        counts = dict(rows)
+        return counts.get("sent", 0), sum(counts.values())

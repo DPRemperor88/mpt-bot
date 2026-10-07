@@ -9,7 +9,7 @@ ENV PYTHONUNBUFFERED=1 \
 WORKDIR /app
 
 # Сначала только зависимости — слой кэшируется и пересборка идёт быстро
-COPY requirements.txt .
+COPY requirements.txt requirements.lock ./
 RUN pip install --no-cache-dir --upgrade pip \
     && pip install --no-cache-dir -r requirements.txt
 

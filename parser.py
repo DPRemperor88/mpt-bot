@@ -57,8 +57,11 @@ def _label_variants(cell) -> dict | None:
     for lbl in labels:
         classes = lbl.get("class") or []
         # Класс называется "label-danger"/"label-info", поэтому проверяем вхождение.
-        color = "danger" if any("danger" in c for c in classes) else "info"
-        week = WEEK_COLOR_MAP.get(color, "знаменатель")
+        colors = [c.removeprefix("label-") for c in classes if c.startswith("label-")]
+        color = next((c for c in colors if c in WEEK_COLOR_MAP), None)
+        if color is None:
+            raise ValueError("Неизвестный цвет недели в расписании")
+        week = WEEK_COLOR_MAP[color]
         result[week] = lbl.get_text(" ", strip=True)
     return result
 
@@ -94,15 +97,17 @@ def parse_schedule(html: str, group_name: str) -> dict:
     soup = BeautifulSoup(html, "html.parser")
 
     # 1) Текущая неделя, объявленная сайтом («Неделя: Знаменатель»).
-    anchor_week = "знаменатель"
+    anchor_week = None
     for h in soup.find_all(["h2", "h3", "h4"]):
         text = h.get_text(" ", strip=True)
         if text.lower().startswith("неделя"):
             span = h.find("span")
             if span is not None:
                 span_text = span.get_text(" ", strip=True).lower()
-                anchor_week = "числитель" if "числител" in span_text else "знаменатель"
+                anchor_week = next((w for w in WEEK_TYPES if w in span_text), None)
             break
+    if anchor_week is None:
+        raise ValueError("Не удалось определить неделю расписания")
 
     # 2) Найти вкладку группы (вкладки: <ul class="nav nav-tabs"><li><a href="#id">…).
     target_id: str | None = None
@@ -112,12 +117,6 @@ def parse_schedule(html: str, group_name: str) -> dict:
         if group_name in tokens:
             target_id = a.get("href", "").lstrip("#")
             break
-    if target_id is None:
-        # запасной вариант — вхождение подстроки
-        for a in soup.select('ul.nav-tabs a[href]'):
-            if group_name in a.get_text(" ", strip=True):
-                target_id = a.get("href", "").lstrip("#")
-                break
     if not target_id:
         raise ValueError(f"Группа «{group_name}» не найдена на странице расписания")
 
@@ -157,6 +156,8 @@ def parse_schedule(html: str, group_name: str) -> dict:
                 }
             )
 
+    if not days or not any(days.values()):
+        raise ValueError("Пустое или нераспознанное расписание; кэш сохранён")
     return {
         "group": group_name,
         "anchor_date": datetime.now(TZ).date().isoformat(),

@@ -65,7 +65,7 @@ def render_schedule_text(
     lines: list[str] = []
     for lesson in sorted(lessons, key=lambda x: x.get("number", 0)):
         variants = lesson.get("variants", {})
-        variant = variants.get(week) or variants.get(OTHER_WEEK.get(week))
+        variant = variants.get(week)
         if not variant:
             continue
         subject = (variant.get("subject") or "").strip()

@@ -12,7 +12,7 @@ from __future__ import annotations
 
 from datetime import date, datetime, timedelta, timezone
 
-from aiogram import F, Router
+from aiogram import BaseMiddleware, F, Router
 from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
@@ -32,7 +32,7 @@ from services import (
     broadcast,
     get_role,
     get_subjects,
-    notify_new_homework,
+    create_homework,
     subject_lesson_days,
 )
 from utils import DAY_RU_SHORT, esc, format_date_ru, format_date_short, shorten
@@ -45,6 +45,25 @@ admin_router.message.filter(F.chat.type == "private")
 admin_router.callback_query.filter(F.message.chat.type == "private")
 
 MODERATOR_ROLES = ("admin", "moderator")
+
+
+class AdminAccessMiddleware(BaseMiddleware):
+    """Проверка роли на каждом шаге, включая уже начатые FSM-сценарии."""
+
+    async def __call__(self, handler, event, data):
+        name = data["handler"].callback.__name__
+        roles = ("admin",) if name in {"adm_add_mod", "adm_broadcast", "add_mod_handler", "broadcast_do"} else MODERATOR_ROLES
+        if name == "admin_exit" or await _require_role(event.from_user.id, roles):
+            return await handler(event, data)
+        await data["state"].clear()
+        if isinstance(event, CallbackQuery):
+            await event.answer("Недостаточно прав.", show_alert=True)
+        else:
+            await event.answer("Недостаточно прав.")
+
+
+admin_router.message.middleware(AdminAccessMiddleware())
+admin_router.callback_query.middleware(AdminAccessMiddleware())
 
 
 async def _require_role(user_id: int, roles: tuple[str, ...]) -> str | None:
@@ -384,29 +403,27 @@ async def add_hw_done(cq: CallbackQuery, state: FSMContext) -> None:
         return
 
     due = date.fromisoformat(due_str)
-    hw = await crud.add_homework(
+    await create_homework(
         subject=subject,
         text=text,
         due_date=due,
         created_by=cq.from_user.id,
+        files=[(f[0], f[1]) for f in files],
     )
-    await crud.add_homework_files(hw.id, [(f[0], f[1]) for f in files])
-    await crud.add_log(cq.from_user.id, "add_hw", f"{subject}, срок {due.isoformat()}")
     await state.clear()
     await _screen(cq, f"ДЗ по «{esc(subject)}» сохранено. Срок: {format_date_ru(due)}.")
-    await notify_new_homework(cq.bot, hw)
 
 
 # ---------------------------------------------------------------------------
 # Список ДЗ (завершение / удаление)
 # ---------------------------------------------------------------------------
-async def _render_hw_list(bot, chat_id: int, user_id: int) -> None:
-    items = await crud.list_homework(limit=20)
+async def _render_hw_list(bot, chat_id: int, user_id: int, page: int = 0) -> None:
+    items = await crud.list_homework(limit=11, offset=page * 10)
     if not items:
         await ui.update(bot, chat_id, user_id, "Заданий пока нет.")
         return
 
-    pairs = annotate_homework(list(items), datetime.now(TZ))
+    pairs = annotate_homework(list(items[:10]), datetime.now(TZ))
 
     lines = ["<b>Домашние задания:</b>"]
     buttons = []
@@ -430,6 +447,7 @@ async def _render_hw_list(bot, chat_id: int, user_id: int) -> None:
             ]
         )
 
+    buttons.extend(_page_buttons("hw", page, len(items) > 10))
     await ui.update(
         bot,
         chat_id,
@@ -444,7 +462,10 @@ async def hw_delete(cq: CallbackQuery) -> None:
     await cq.answer()
     if await _require_role(cq.from_user.id, MODERATOR_ROLES) is None:
         return
-    hw_id = int(cq.data.split(":", 1)[1])
+    value = cq.data.split(":", 1)[1]
+    if not value.isdigit():
+        return
+    hw_id = int(value)
     hw = await crud.get_homework(hw_id)
     await crud.delete_homework(hw_id)
     if hw is not None:
@@ -455,7 +476,7 @@ async def hw_delete(cq: CallbackQuery) -> None:
 # ---------------------------------------------------------------------------
 # Участники
 # ---------------------------------------------------------------------------
-async def _render_users(bot, chat_id: int, user_id: int) -> None:
+async def _render_users(bot, chat_id: int, user_id: int, page: int = 0) -> None:
     users = await crud.list_users()
     if not users:
         await ui.update(bot, chat_id, user_id, "Пользователей пока нет.")
@@ -463,19 +484,17 @@ async def _render_users(bot, chat_id: int, user_id: int) -> None:
 
     roles = {"admin": "админ", "moderator": "модератор", "student": "студент"}
     lines = [f"<b>Участники: {len(users)}</b>", ""]
-    for i, u in enumerate(users[:40], start=1):
+    for i, u in enumerate(users[page * 10:(page + 1) * 10], start=page * 10 + 1):
         name = esc(u.full_name or "без имени")
         username = f" @{esc(u.username)}" if u.username else ""
         role = roles.get(u.role, esc(u.role))
         lines.append(f"{i}. {name}{username} — <code>{u.telegram_id}</code> ({role})")
-    if len(users) > 40:
-        lines.append(f"\nпоказаны первые 40 из {len(users)}")
-
-    await ui.update(bot, chat_id, user_id, "\n".join(lines))
+    await ui.update(bot, chat_id, user_id, "\n".join(lines), InlineKeyboardMarkup(
+        inline_keyboard=_page_buttons("users", page, len(users) > (page + 1) * 10)))
 
 
-async def _render_log(bot, chat_id: int, user_id: int) -> None:
-    entries = await crud.list_log(limit=20)
+async def _render_log(bot, chat_id: int, user_id: int, page: int = 0) -> None:
+    entries = await crud.list_log(limit=11, offset=page * 10)
     if not entries:
         await ui.update(bot, chat_id, user_id, "Журнал пуст.")
         return
@@ -487,7 +506,7 @@ async def _render_log(bot, chat_id: int, user_id: int) -> None:
         "broadcast": "сделал рассылку",
     }
     lines = ["<b>Журнал действий:</b>", ""]
-    for entry in entries:
+    for entry in entries[:10]:
         when = ""
         if entry.created_at:
             when = (
@@ -497,7 +516,28 @@ async def _render_log(bot, chat_id: int, user_id: int) -> None:
             )
         what = actions.get(entry.action, entry.action)
         lines.append(f"{when} · <code>{entry.telegram_id}</code> {what}: {esc(entry.details)}")
-    await ui.update(bot, chat_id, user_id, "\n".join(lines))
+    await ui.update(bot, chat_id, user_id, "\n".join(lines), InlineKeyboardMarkup(
+        inline_keyboard=_page_buttons("log", page, len(entries) > 10)))
+
+
+def _page_buttons(kind: str, page: int, has_next: bool) -> list:
+    buttons = []
+    if page:
+        buttons.append(InlineKeyboardButton(text="← Назад", callback_data=f"page:{kind}:{page - 1}"))
+    if has_next:
+        buttons.append(InlineKeyboardButton(text="Далее →", callback_data=f"page:{kind}:{page + 1}"))
+    return [buttons] if buttons else []
+
+
+@admin_router.callback_query(F.data.startswith("page:"))
+async def admin_page(cq: CallbackQuery) -> None:
+    await cq.answer()
+    parts = cq.data.split(":")
+    if len(parts) != 3 or not parts[2].isdigit():
+        return
+    render = {"hw": _render_hw_list, "users": _render_users, "log": _render_log}.get(parts[1])
+    if render:
+        await render(cq.bot, cq.message.chat.id, cq.from_user.id, int(parts[2]))
 
 
 # ---------------------------------------------------------------------------
@@ -507,9 +547,10 @@ async def _render_log(bot, chat_id: int, user_id: int) -> None:
 async def add_mod_handler(msg: Message, state: FSMContext) -> None:
     user_id: int | None = None
 
-    if msg.forward_from is not None:
-        user_id = msg.forward_from.id
-    elif msg.forward_sender_name is not None:
+    origin = msg.forward_origin
+    if origin is not None and origin.type == "user":
+        user_id = origin.sender_user.id
+    elif origin is not None:
         await ui.delete_safe(msg.bot, msg.chat.id, msg.message_id)
         await ui.update(
             msg.bot,
@@ -520,7 +561,7 @@ async def add_mod_handler(msg: Message, state: FSMContext) -> None:
         return
     else:
         txt = (msg.text or "").strip()
-        if txt.lstrip("-").isdigit():
+        if txt.isdigit() and int(txt) > 0:
             user_id = int(txt)
 
     await ui.delete_safe(msg.bot, msg.chat.id, msg.message_id)
@@ -532,6 +573,10 @@ async def add_mod_handler(msg: Message, state: FSMContext) -> None:
             msg.from_user.id,
             "Не удалось определить ID.",
         )
+        return
+
+    if await get_role(user_id) == "admin":
+        await ui.update(msg.bot, msg.chat.id, msg.from_user.id, "Этот пользователь уже администратор.")
         return
 
     # Регистрируем пользователя (если ещё не был), затем выдаём роль.
@@ -568,7 +613,7 @@ async def broadcast_do(msg: Message, state: FSMContext) -> None:
     elif msg.document:
         media = (msg.document.file_id, "document")
 
-    text = msg.caption or msg.text or ""
+    text = esc(msg.caption or msg.text or "")
     await state.clear()
     await ui.delete_safe(msg.bot, msg.chat.id, msg.message_id)
 
@@ -578,5 +623,6 @@ async def broadcast_do(msg: Message, state: FSMContext) -> None:
         msg.bot,
         msg.chat.id,
         msg.from_user.id,
-        f"Рассылка завершена: доставлено {delivered} из {total}.",
+        f"Рассылка сохранена: доставлено {delivered} из {total}. "
+        "Временные ошибки будут повторены автоматически; постоянные записываются в журнал сервера.",
     )

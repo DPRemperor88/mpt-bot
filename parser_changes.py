@@ -27,54 +27,53 @@ from config import CHANGES_URL
 
 
 def parse_changes(html: str, group_name: str) -> dict:
-    """Возвращает {'date': 'YYYY-MM-DD', 'changes': [ {lesson, replace_from,
-    replace_to, added_at}, ... ]} для заданной группы."""
+    """Возвращает опубликованные dates и changes с собственной date у каждой записи."""
     soup = BeautifulSoup(html, "html.parser")
 
     # Дата замен (из заголовка «Замены на <b>DD.MM.YYYY</b>»).
     change_date: date | None = None
-    for h in soup.find_all(["h2", "h3", "h4", "h5"]):
-        text = h.get_text(" ", strip=True)
-        if "замен" in text.lower():
-            m = re.search(r"(\d{2}\.\d{2}\.\d{4})", text)
-            if m:
-                change_date = datetime.strptime(m.group(1), "%d.%m.%Y").date()
-                break
-    if change_date is None:
-        # запасной вариант — первая попавшаяся дата на странице
-        m = re.search(r"(\d{2}\.\d{2}\.\d{4})", soup.get_text(" ", strip=True))
-        change_date = (
-            datetime.strptime(m.group(1), "%d.%m.%Y").date() if m else date.today()
-        )
-
+    dates: list[str] = []
     changes: list[dict] = []
-    for table in soup.find_all("table"):
-        caption = table.find("caption")
-        if caption is None:
-            continue
-        caption_text = caption.get_text(" ", strip=True)  # «Группа: П-4-23»
-        groups = [
-            x.strip()
-            for x in re.split(r"Группа:|;|,", caption_text)
-            if x.strip()
-        ]
-        if group_name not in groups:
-            continue
-
-        for tr in table.find_all("tr"):
-            tds = tr.find_all("td")
-            if len(tds) < 4:
+    recognized_table = False
+    for node in soup.find_all(["h2", "h3", "h4", "h5", "table"]):
+        if node.name == "table":
+            caption = node.find("caption")
+            if caption is None:
+                if node.select(".lesson-number, .replace-from, .replace-to"):
+                    raise ValueError("Таблица замен без названия группы")
                 continue
-            changes.append(
-                {
+            recognized_table = recognized_table or "Группа:" in caption.get_text()
+            groups = [x.strip() for x in re.split(r"Группа:|;|,", caption.get_text(" ", strip=True)) if x.strip()]
+            if group_name not in groups:
+                continue
+            if change_date is None:
+                raise ValueError("Таблица замен без даты")
+            for tr in node.find_all("tr"):
+                tds = tr.find_all("td")
+                if not tds:
+                    continue
+                if len(tds) < 4:
+                    raise ValueError("Неизвестная структура строки замен")
+                changes.append({
+                    "date": change_date.isoformat(),
                     "lesson": tds[0].get_text(" ", strip=True),
                     "replace_from": tds[1].get_text(" ", strip=True),
                     "replace_to": tds[2].get_text(" ", strip=True),
                     "added_at": tds[3].get_text(" ", strip=True),
-                }
-            )
-
-    return {"date": change_date.isoformat(), "changes": changes}
+                })
+            continue
+        text = node.get_text(" ", strip=True)
+        if "замен" in text.lower():
+            change_date = None
+            m = re.search(r"(\d{2}\.\d{2}\.\d{4})", text)
+            if m:
+                change_date = datetime.strptime(m.group(1), "%d.%m.%Y").date()
+                dates.append(change_date.isoformat())
+    if not dates:
+        raise ValueError("Не найдены заголовки с датами замен; кэш сохранён")
+    if not recognized_table and not re.search(r"замен нет|изменений нет|нет замен", soup.get_text(" ", strip=True).lower()):
+        raise ValueError("Не распознаны таблицы или явное отсутствие замен")
+    return {"date": dates[0], "dates": list(dict.fromkeys(dates)), "changes": changes}
 
 
 async def fetch_changes(group_name: str, url: str | None = None) -> dict:
