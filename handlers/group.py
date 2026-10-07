@@ -21,7 +21,7 @@ from config import GROUP_NAME, TZ
 from database import crud
 from keyboards import group_menu
 from services import annotate_homework, send_homework_media
-from utils import render_group_homework
+from utils import render_homework_day
 
 group_router = Router()
 
@@ -86,8 +86,9 @@ async def _show_homework(
     chat_id = chat.id
     now = datetime.now(TZ)
     items = [hw for hw, passed in annotate_homework(items, now) if not passed]
+    with_files = await crud.homework_ids_with_files([hw.id for hw in items])
 
-    text = render_group_homework(items, target, label)
+    text = render_homework_day(items, target, label, with_files)
 
     if menu_message is not None:
         await menu_message.edit_text(text, reply_markup=group_menu())

@@ -90,17 +90,6 @@ async def add_homework(
         return hw
 
 
-async def list_active_homework(on_date: date) -> list[Homework]:
-    """Активные ДЗ: не завершены и дедлайн ещё не прошёл (due_date >= on_date)."""
-    async with SessionLocal() as s:
-        res = await s.execute(
-            select(Homework)
-            .where(Homework.is_active.is_(True), Homework.due_date >= on_date)
-            .order_by(Homework.created_at.desc(), Homework.due_date.asc())
-        )
-        return list(res.scalars().all())
-
-
 async def list_homework_on(due_date: date) -> list[Homework]:
     """Активные ДЗ с дедлайном ровно на указанную дату (для группового чата)."""
     async with SessionLocal() as s:
@@ -154,6 +143,19 @@ async def list_homework_files(homework_id: int) -> list[HomeworkFile]:
             .order_by(HomeworkFile.id)
         )
         return list(res.scalars().all())
+
+
+async def homework_ids_with_files(homework_ids: list[int]) -> set[int]:
+    """Возвращает id заданий, у которых есть вложения в таблице файлов."""
+    if not homework_ids:
+        return set()
+    async with SessionLocal() as s:
+        res = await s.execute(
+            select(HomeworkFile.homework_id)
+            .where(HomeworkFile.homework_id.in_(homework_ids))
+            .distinct()
+        )
+        return set(res.scalars().all())
 
 
 async def delete_homework(homework_id: int) -> None:

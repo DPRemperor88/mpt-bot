@@ -77,33 +77,30 @@ def render_schedule_text(
     return "\n".join(lines).strip()
 
 
-def render_homework_list(items: list) -> str:
+def render_homework_day(
+    items: list,
+    target: date,
+    label: str,
+    with_files: set[int] | None = None,
+) -> str:
     """
-    Формирует список активных ДЗ:
-        [Дисциплина] — [Текст ДЗ] (до [Дата])
-    """
-    lines: list[str] = []
-    for hw in items:
-        marker = " (вложение)" if hw.media_file_id else ""
-        lines.append(
-            f"• <b>{esc(hw.subject)}</b> — {esc(hw.text)} "
-            f"(до {format_date_ru(hw.due_date)}){marker}"
-        )
-    return "\n".join(lines)
+    Формирует список ДЗ на конкретный день (личка и групповой чат).
 
-
-def render_group_homework(items: list, target: date, label: str) -> str:
+    label — «сегодня» или «завтра». with_files — id заданий, у которых есть вложения.
     """
-    Формирует список ДЗ для группового чата (на сегодня/на завтра).
+    with_files = with_files or set()
 
-    label — «сегодня» или «завтра».
-    """
     header = f"<b>Домашнее задание на {label} — {format_date_ru(target)}</b>"
     if not items:
         return f"{header}\n\nЗаданий нет."
 
     lines = [header, ""]
     for hw in items:
-        marker = " (вложение)" if hw.media_file_id else ""
-        lines.append(f"• <b>{esc(hw.subject)}</b> — {esc(hw.text)}{marker}")
+        text = esc(hw.text).strip()
+        has_file = bool(hw.media_file_id) or hw.id in with_files
+        if text:
+            body = f"{text} (вложение)" if has_file else text
+        else:
+            body = "(вложение)" if has_file else "—"
+        lines.append(f"• <b>{esc(hw.subject)}</b> — {body}")
     return "\n".join(lines)

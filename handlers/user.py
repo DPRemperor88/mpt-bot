@@ -1,10 +1,10 @@
 """
 handlers/user.py — хэндлеры обычного пользователя (личный чат):
   /start (приветствие с Telegram ID), /menu, «Расписание на сегодня/завтра»,
-  «Домашнее задание».
+  «ДЗ на сегодня/завтра».
 
 Разделы показываются в одном экране: предыдущий удаляется. Если у ДЗ есть
-вложение, оно отправляется вместе с текстом.
+вложения, они отправляются вместе с текстом.
 """
 from __future__ import annotations
 
@@ -28,7 +28,7 @@ from services import (
 from utils import (
     format_date_ru,
     normalize_subject,
-    render_homework_list,
+    render_homework_day,
     render_schedule_text,
 )
 
@@ -116,13 +116,16 @@ async def _send_schedule(msg: Message, offset: int) -> None:
         await ui.show(msg.bot, chat_id, user_id, header + "\n\n—")
         return
 
-    # Последнее активное ДЗ по каждой дисциплине.
+    # В расписании показываем задания, срок сдачи которых приходится на этот день.
+    day_homework = await crud.list_homework_on(target)
+    with_files = await crud.homework_ids_with_files([hw.id for hw in day_homework])
+
     homework: dict[str, object] = {}
-    for hw in await crud.list_active_homework(target):
+    for hw in day_homework:
         homework.setdefault(normalize_subject(hw.subject), hw)
 
     display = {
-        key: (hw.text.strip() or "(вложение)")
+        key: (hw.text.strip() or ("(вложение)" if hw.id in with_files else "—"))
         for key, hw in homework.items()
     }
 
@@ -133,7 +136,7 @@ async def _send_schedule(msg: Message, offset: int) -> None:
     sent = await msg.bot.send_message(chat_id, header + "\n\n" + body)
     ids = [sent.message_id]
 
-    # Вложения ДЗ по дисциплинам этого дня (каждое по одному разу).
+    # Вложения заданий этого дня (каждое по одному разу).
     seen: set[int] = set()
     for lesson in lessons:
         variant = lesson.get("variants", {}).get(week)
@@ -150,23 +153,39 @@ async def _send_schedule(msg: Message, offset: int) -> None:
 # ---------------------------------------------------------------------------
 # Домашние задания
 # ---------------------------------------------------------------------------
-@user_router.message(F.text == "Домашнее задание")
-async def homework_list(msg: Message) -> None:
+@user_router.message(F.text == "ДЗ на сегодня")
+async def homework_today(msg: Message) -> None:
+    await _send_homework(msg, 0)
+
+
+@user_router.message(F.text == "ДЗ на завтра")
+async def homework_tomorrow(msg: Message) -> None:
+    await _send_homework(msg, 1)
+
+
+async def _send_homework(msg: Message, offset: int) -> None:
     user_id = msg.from_user.id
     chat_id = msg.chat.id
+    label = "сегодня" if offset == 0 else "завтра"
     await ui.delete_safe(msg.bot, chat_id, msg.message_id)
 
     now = datetime.now(TZ)
-    items = await crud.list_active_homework(now.date())
-    # задания, пара по которым уже началась, в разделе ДЗ не показываем
+    target = now.date() + timedelta(days=offset)
+
+    items = await crud.list_homework_on(target)
+    # задания, срок по которым уже прошёл, в разделе ДЗ не показываем
     items = [hw for hw, passed in annotate_homework(items, now) if not passed]
+    with_files = await crud.homework_ids_with_files([hw.id for hw in items])
 
     await ui.clear(msg.bot, chat_id, user_id)
     if not items:
-        await ui.show(msg.bot, chat_id, user_id, "Активных домашних заданий нет.")
+        await ui.show(msg.bot, chat_id, user_id, f"Домашних заданий на {label} нет.")
         return
 
-    sent = await msg.bot.send_message(chat_id, render_homework_list(items))
+    sent = await msg.bot.send_message(
+        chat_id,
+        render_homework_day(items, target, label, with_files),
+    )
     ids = [sent.message_id]
     for hw in items:
         ids.extend(await send_homework_media(msg.bot, chat_id, hw))

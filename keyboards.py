@@ -17,9 +17,14 @@ from aiogram.types import (
 def main_menu(is_privileged: bool = False) -> ReplyKeyboardMarkup:
     """Главное меню. Кнопка админ-панели видна только админам/модераторам."""
     keyboard = [
-        [KeyboardButton(text="Расписание на сегодня")],
-        [KeyboardButton(text="Расписание на завтра")],
-        [KeyboardButton(text="Домашнее задание")],
+        [
+            KeyboardButton(text="Расписание на сегодня"),
+            KeyboardButton(text="Расписание на завтра"),
+        ],
+        [
+            KeyboardButton(text="ДЗ на сегодня"),
+            KeyboardButton(text="ДЗ на завтра"),
+        ],
     ]
     if is_privileged:
         keyboard.append([KeyboardButton(text="Админ-панель")])
